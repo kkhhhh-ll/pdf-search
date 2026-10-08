@@ -2302,3 +2302,89 @@ body { background: #f4f7f8; }
     display: none;
   }
 }
+
+/* Keep scrollbars from shifting the layout when they appear. */
+.chat-scroll,
+.session-list,
+.drawer,
+.source-panel,
+.review-issue-list,
+.user-list,
+.evidence-page-preview,
+.evidence-copy {
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: #c8d2d5 transparent;
+}
+
+.chat-scroll::-webkit-scrollbar,
+.session-list::-webkit-scrollbar,
+.drawer::-webkit-scrollbar,
+.source-panel::-webkit-scrollbar,
+.review-issue-list::-webkit-scrollbar,
+.user-list::-webkit-scrollbar,
+.evidence-page-preview::-webkit-scrollbar,
+.evidence-copy::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+.chat-scroll::-webkit-scrollbar-track,
+.session-list::-webkit-scrollbar-track,
+.drawer::-webkit-scrollbar-track,
+.source-panel::-webkit-scrollbar-track,
+.review-issue-list::-webkit-scrollbar-track,
+.user-list::-webkit-scrollbar-track,
+.evidence-page-preview::-webkit-scrollbar-track,
+.evidence-copy::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-scroll::-webkit-scrollbar-thumb,
+.session-list::-webkit-scrollbar-thumb,
+.drawer::-webkit-scrollbar-thumb,
+.source-panel::-webkit-scrollbar-thumb,
+.review-issue-list::-webkit-scrollbar-thumb,
+.user-list::-webkit-scrollbar-thumb,
+.evidence-page-preview::-webkit-scrollbar-thumb,
+.evidence-copy::-webkit-scrollbar-thumb {
+  min-height: 36px;
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: #c8d2d5;
+  background-clip: content-box;
+}
+
+.chat-scroll::-webkit-scrollbar-thumb:hover,
+.session-list::-webkit-scrollbar-thumb:hover,
+.drawer::-webkit-scrollbar-thumb:hover,
+.source-panel::-webkit-scrollbar-thumb:hover,
+.review-issue-list::-webkit-scrollbar-thumb:hover,
+.user-list::-webkit-scrollbar-thumb:hover,
+.evidence-page-preview::-webkit-scrollbar-thumb:hover,
+.evidence-copy::-webkit-scrollbar-thumb:hover {
+  background: #9fadb2;
+  background-clip: content-box;
+}
+
+.session-list {
+  scrollbar-color: #4d5558 transparent;
+}
+
+.session-list::-webkit-scrollbar-thumb {
+  background: #4d5558;
+  background-clip: content-box;
+}
+
+@media (max-width: 900px) {
+  .chat-scroll,
+  .session-list,
+  .drawer,
+  .source-panel,
+  .review-issue-list,
+  .user-list,
+  .evidence-page-preview,
+  .evidence-copy {
+    scrollbar-gutter: auto;
+  }
+}
