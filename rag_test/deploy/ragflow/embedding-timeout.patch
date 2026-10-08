@@ -1,0 +1,30 @@
+--- a/rag/llm/embedding_model.py	2026-10-08 16:19:33
++++ b/rag/llm/embedding_model.py	2026-10-08 15:56:39
+@@ -242,7 +242,7 @@
+         self._max_tokens = BuiltinEmbed._max_tokens
+ 
+     def encode(self, texts: list):
+-        batch_size = 16
++        batch_size = max(1, int(os.getenv("RAGFLOW_EMBED_BATCH_SIZE", "4")))
+         # TEI is able to auto truncate inputs according to https://github.com/huggingface/text-embeddings-inference.
+         token_count = 0
+         batches = []
+@@ -1228,15 +1228,16 @@
+         self.key = key
+         self.model_name = model_name.split("___")[0]
+         self.base_url = base_url or "http://127.0.0.1:8080"
++        self.timeout = int(os.getenv("RAGFLOW_EMBED_TIMEOUT", "180"))
+ 
+     def encode(self, texts: list):
+-        response = requests.post(f"{self.base_url}/embed", json={"inputs": texts}, headers={"Content-Type": "application/json"}, timeout=30)
++        response = requests.post(f"{self.base_url}/embed", json={"inputs": texts}, headers={"Content-Type": "application/json"}, timeout=self.timeout)
+         _raise_model_exception_if_failed(response)
+         # TEI auto-truncates oversized inputs, so no client-side truncation is needed.
+         return np.array(response.json()), sum([num_tokens_from_string(text) for text in texts])
+ 
+     def encode_queries(self, text: str):
+-        response = requests.post(f"{self.base_url}/embed", json={"inputs": text}, headers={"Content-Type": "application/json"}, timeout=30)
++        response = requests.post(f"{self.base_url}/embed", json={"inputs": text}, headers={"Content-Type": "application/json"}, timeout=self.timeout)
+         _raise_model_exception_if_failed(response)
+         return np.array(response.json()[0]), num_tokens_from_string(text)
+ 
