@@ -2388,3 +2388,71 @@ body { background: #f4f7f8; }
     scrollbar-gutter: auto;
   }
 }
+
+/* Hard guarantee against scrollbar-induced layout shifts. */
+.chat-scroll,
+.session-list {
+  overflow-y: scroll;
+}
+
+.chat-scroll {
+  scrollbar-gutter: stable;
+}
+
+.chat-scroll::-webkit-scrollbar-thumb {
+  background: rgba(159, 173, 178, .55);
+  background-clip: content-box;
+}
+
+.chat-scroll:hover::-webkit-scrollbar-thumb {
+  background: #9fadb2;
+  background-clip: content-box;
+}
+
+.chat-header {
+  padding-right: calc(28px + 9px);
+}
+
+.composer-dock {
+  padding-right: calc(28px + 9px);
+}
+
+.sidebar-section.sessions-section .session-list {
+  margin-right: -9px;
+  padding-right: 9px;
+  scrollbar-gutter: auto;
+}
+
+.session-list::-webkit-scrollbar-thumb {
+  background: rgba(77, 85, 88, .75);
+  background-clip: content-box;
+}
+
+.session-list:hover::-webkit-scrollbar-thumb {
+  background: #596366;
+  background-clip: content-box;
+}
+
+@media (max-width: 900px) {
+  .chat-scroll,
+  .session-list {
+    overflow-y: auto;
+  }
+
+  .chat-header,
+  .composer-dock {
+    padding-right: 14px;
+  }
+
+  .sidebar-section.sessions-section .session-list {
+    margin-right: 0;
+    padding-right: 0;
+  }
+}
+
+@media (max-width: 600px) {
+  .chat-header,
+  .composer-dock {
+    padding-right: 10px;
+  }
+}
