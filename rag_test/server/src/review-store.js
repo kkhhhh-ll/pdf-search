@@ -23,6 +23,7 @@ function issueFromRow(row) {
     docId: row.doc_id,
     fileName: row.file_name,
     page: row.page,
+    partPage: row.part_page,
     blockId: row.block_id,
     bbox: row.bbox || [],
     sourceText: row.source_text,
@@ -63,7 +64,7 @@ export async function addReviewIssues(taskId, issues = []) {
   const params = [];
   const keys = [
     'id', 'task_id', 'paragraph_index', 'issue_type', 'severity', 'doc_id',
-    'file_name', 'page', 'block_id', 'bbox', 'source_text', 'evidence_text',
+    'file_name', 'page', 'part_page', 'block_id', 'bbox', 'source_text', 'evidence_text',
     'suggestion', 'reason', 'confidence', 'status',
   ];
   issues.forEach((issue, index) => {
@@ -78,6 +79,7 @@ export async function addReviewIssues(taskId, issues = []) {
       issue.docId || null,
       issue.fileName || null,
       issue.page || null,
+      issue.partPage || null,
       issue.blockId || null,
       JSON.stringify(issue.bbox || []),
       issue.sourceText || '',

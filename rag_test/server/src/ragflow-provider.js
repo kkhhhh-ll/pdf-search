@@ -108,6 +108,7 @@ function mapPartPage(fileName, page) {
   return {
     fileName: part?.originalName || fileName || '',
     page: part && page ? page + part.pageStart - 1 : page,
+    partPage: page,
     part,
   };
 }
@@ -120,6 +121,7 @@ function resultFromChunk(chunk = {}) {
     doc_id: chunk.document_id || chunk.doc_id || '',
     file_name: mapped.fileName,
     page: mapped.page,
+    part_page: mapped.partPage,
     block_id: chunk.id || chunk.chunk_id || chunk._id || '',
     section: chunk.section || '',
     text,
@@ -260,6 +262,7 @@ export function createRagFlowProvider({
         doc_id: source.doc_id || source.document_id || '',
         file_name: mapped.fileName,
         page: mapped.page,
+        part_page: mapped.partPage,
         block_id: source.id || hit._id || '',
         section: source.section || '',
         text: source.content_with_weight || source.content || '',
@@ -355,6 +358,7 @@ export function createRagFlowProvider({
       block_id: chunk.id || blockId,
       section: chunk.section || '',
       page: mapped.page,
+      part_page: mapped.partPage,
       bbox: [],
       text: chunk.content || chunk.content_with_weight || '',
     };
@@ -460,11 +464,21 @@ export function createRagFlowProvider({
     }
   }
 
+  async function documentFile(documentId) {
+    const id = await resolveDatasetId();
+    const response = await fetch(
+      joinUrl(baseUrl, `/api/v1/datasets/${encodeURIComponent(id)}/documents/${encodeURIComponent(documentId)}`),
+      { headers: { Authorization: `Bearer ${apiKey}` } },
+    );
+    if (!response.ok) throw new Error(`RAGFlow 原文件读取失败: HTTP ${response.status}`);
+    return response;
+  }
+
   async function health() {
     const response = await fetch(joinUrl(baseUrl, '/api/v1/system/healthz'));
     if (!response.ok) throw new Error(`RAGFlow HTTP ${response.status}`);
     return response.json();
   }
 
-  return { exact, hybrid, health, pageImage, block, blockImage, deleteDocument, indexDocument };
+  return { exact, hybrid, health, pageImage, block, blockImage, documentFile, deleteDocument, indexDocument };
 }

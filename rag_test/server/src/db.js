@@ -89,6 +89,7 @@ export async function initDb() {
       doc_id TEXT,
       file_name TEXT,
       page INTEGER,
+      part_page INTEGER,
       block_id TEXT,
       bbox JSONB,
       source_text TEXT NOT NULL DEFAULT '',
@@ -102,6 +103,9 @@ export async function initDb() {
 
     ALTER TABLE messages
       ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+    ALTER TABLE review_issues
+      ADD COLUMN IF NOT EXISTS part_page INTEGER;
 
     CREATE TABLE IF NOT EXISTS message_citations (
       id TEXT PRIMARY KEY,

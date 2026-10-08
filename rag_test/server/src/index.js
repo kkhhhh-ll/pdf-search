@@ -226,6 +226,7 @@ function toFrontendChunk(result, datasetId = VIRTUAL_DATASET_ID) {
     document_id: result.doc_id || '',
     document_keyword: result.file_name || result.doc_id || '',
     dataset_id: datasetId,
+    part_page: result.part_page,
     similarity: score,
     term_similarity: score,
     vector_similarity: score,
@@ -532,6 +533,19 @@ app.get('/api/knowledge/documents/:docId/pages/:page/image', requireSession, asy
   try {
     const payload = await documents.pageImage(req.params.docId, req.params.page);
     return res.json({ code: 0, data: payload });
+  } catch (error) {
+    return res.status(error?.status || 502).json({ code: error?.status || 502, message: String(error?.message || error) });
+  }
+});
+
+app.get('/api/knowledge/documents/:docId/file', requireSession, async (req, res) => {
+  try {
+    const upstream = await documents.documentFile(req.params.docId);
+    const buffer = Buffer.from(await upstream.arrayBuffer());
+    res.setHeader('Content-Type', upstream.headers.get('content-type') || 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(req.params.docId)}.pdf"`);
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    return res.send(buffer);
   } catch (error) {
     return res.status(error?.status || 502).json({ code: error?.status || 502, message: String(error?.message || error) });
   }

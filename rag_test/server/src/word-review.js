@@ -153,6 +153,7 @@ function candidateRules(paragraph, paragraphIndex, candidates) {
           docId: candidate.doc_id || candidate.document_id,
           fileName: candidate.file_name || candidate.document_keyword,
           page: candidate.page,
+          partPage: candidate.part_page,
           blockId: candidate.block_id || candidate.id,
           bbox: candidate.bbox || [],
         }));
@@ -201,6 +202,7 @@ function parseLlmIssues(raw, paragraph, paragraphIndex, candidates) {
         docId: candidate.doc_id || candidate.document_id,
         fileName: candidate.file_name || candidate.document_keyword,
         page: candidate.page,
+        partPage: candidate.part_page,
         blockId: candidate.block_id || candidate.id,
         bbox: candidate.bbox || [],
       });
@@ -246,6 +248,7 @@ function attachCandidateEvidence(issues, candidatesByParagraph) {
     issue.docId = candidate.doc_id || candidate.document_id;
     issue.fileName = candidate.file_name || candidate.document_keyword;
     issue.page = candidate.page;
+    issue.partPage = candidate.part_page;
     issue.blockId = candidate.block_id || candidate.id;
     issue.bbox = candidate.bbox || [];
     issue.evidenceText = issue.evidenceText || String(candidate.text || candidate.content || '').slice(0, 500);

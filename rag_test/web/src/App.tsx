@@ -55,6 +55,7 @@ type ReviewIssue = {
   docId?: string;
   fileName?: string;
   page?: number;
+  partPage?: number;
   blockId?: string;
   bbox?: number[];
   sourceText: string;
@@ -115,6 +116,7 @@ type Chunk = {
   term_similarity: number;
   vector_similarity: number;
   page?: number;
+  part_page?: number;
   positions?: number[];
   bbox?: number[] | null;
 };
@@ -154,6 +156,36 @@ function createSession(): ChatSession {
 
 function stripHtml(value: string) {
   return String(value || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function renderMarkedText(value: string) {
+  const parts = String(value || '').split(/(<em>[\s\S]*?<\/em>)/gi);
+  return parts.filter(Boolean).map((part, index) => {
+    const match = part.match(/^<em>([\s\S]*)<\/em>$/i);
+    return match
+      ? <mark key={`${index}-${match[1]}`}>{stripHtml(match[1])}</mark>
+      : <span key={`${index}-${part.slice(0, 20)}`}>{stripHtml(part)}</span>;
+  });
+}
+
+function renderDiffText(source: string, suggestion: string, side: 'source' | 'suggestion') {
+  const before = String(source || '');
+  const after = String(suggestion || '');
+  if (!before || !after || before === after) return before || after;
+  let prefix = 0;
+  while (prefix < before.length && prefix < after.length && before[prefix] === after[prefix]) prefix += 1;
+  let suffix = 0;
+  while (
+    suffix < before.length - prefix
+    && suffix < after.length - prefix
+    && before[before.length - 1 - suffix] === after[after.length - 1 - suffix]
+  ) suffix += 1;
+  const changed = side === 'source'
+    ? before.slice(prefix, before.length - suffix)
+    : after.slice(prefix, after.length - suffix);
+  const head = before.slice(0, prefix);
+  const tail = before.slice(before.length - suffix);
+  return <>{head}{changed ? <mark>{changed}</mark> : null}{tail}</>;
 }
 
 function readCookie(name: string) {
@@ -773,7 +805,8 @@ function App() {
       term_similarity: issue.confidence,
       vector_similarity: issue.confidence,
       page: issue.page,
-      positions: [issue.page],
+      part_page: issue.partPage,
+      positions: issue.page ? [issue.page] : [],
       bbox: issue.bbox || [],
     });
   };
@@ -1264,12 +1297,12 @@ function WordReviewResult({ task, onOpenIssue }: { task: ReviewTask; onOpenIssue
             <button className="review-issue" key={issue.id} onClick={() => onOpenIssue(issue)}>
               <div className="review-issue-head">
                 <span className={`review-type ${issue.severity}`}>{issue.issueType}</span>
-                {issue.page ? <span>第 {issue.page} 页</span> : null}
+                {issue.page ? <span>第 {issue.page} 页</span> : <span>段落 {issue.paragraphIndex + 1}</span>}
                 <span>{Math.round(issue.confidence * 100)}%</span>
               </div>
-              <p><strong>原文：</strong>{issue.sourceText}</p>
-              {issue.evidenceText && <p><strong>证据：</strong>{issue.evidenceText}</p>}
-              <p><strong>建议：</strong>{issue.suggestion || '需人工复核'}</p>
+              <p><strong>原文：</strong>{renderDiffText(issue.sourceText, issue.suggestion, 'source')}</p>
+              {issue.evidenceText && <p><strong>证据：</strong>{renderMarkedText(issue.evidenceText)}</p>}
+              <p><strong>建议：</strong>{issue.suggestion ? renderDiffText(issue.sourceText, issue.suggestion, 'suggestion') : '需人工复核'}</p>
               <p className="review-reason">{issue.reason}</p>
             </button>
           ))}
@@ -1354,7 +1387,7 @@ function SourceGroup({
             {chunk.page ? <em>第 {chunk.page} 页</em> : null}
             <strong>{Math.round((chunk.similarity || 0) * 100)}%</strong>
           </div>
-          <p>{stripHtml(chunk.highlight || chunk.content).slice(0, 260)}</p>
+          <p>{renderMarkedText(chunk.highlight || chunk.content)}</p>
         </button>
       ))}
     </div>
@@ -1364,6 +1397,7 @@ function SourceGroup({
 function PdfEvidenceModal({ chunk, onClose }: { chunk: Chunk; onClose: () => void }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [viewMode, setViewMode] = useState<'page' | 'crop'>('page');
   const [pageImage, setPageImage] = useState<{
     image: string;
     width: number;
@@ -1398,6 +1432,10 @@ function PdfEvidenceModal({ chunk, onClose }: { chunk: Chunk; onClose: () => voi
 
   const pageWidth = pageImage?.page_width || pageImage?.width || 1;
   const pageHeight = pageImage?.page_height || pageImage?.height || 1;
+  const previewPage = chunk.part_page || chunk.page || 1;
+  const documentFileUrl = chunk.document_id
+    ? `/api/knowledge/documents/${encodeURIComponent(chunk.document_id)}/file`
+    : '';
   const bbox = chunk.bbox && chunk.bbox.length === 4 ? chunk.bbox : null;
   const boxStyle = bbox ? {
     left: `${(bbox[0] / pageWidth) * 100}%`,
@@ -1419,18 +1457,32 @@ function PdfEvidenceModal({ chunk, onClose }: { chunk: Chunk; onClose: () => voi
         </header>
         <div className="evidence-modal-body">
           <div className="evidence-page-preview">
-            {loading && <div className="evidence-state"><LoaderCircle size={20} className="spin" />正在加载页面...</div>}
-            {error && <div className="evidence-state error">{error}</div>}
-            {pageImage && !error && (
-              <div className="evidence-page-wrap">
-                <img src={pageImage.image} alt={`${chunk.document_keyword || 'PDF'} 第 ${chunk.page} 页`} />
-                {boxStyle && <span className="evidence-bbox" style={boxStyle} />}
-              </div>
+            <div className="evidence-view-switch">
+              <button type="button" className={viewMode === 'page' ? 'active' : ''} onClick={() => setViewMode('page')}>PDF 原页</button>
+              <button type="button" className={viewMode === 'crop' ? 'active' : ''} onClick={() => setViewMode('crop')}>证据截图</button>
+            </div>
+            {viewMode === 'page' && documentFileUrl ? (
+              <iframe
+                className="evidence-pdf-frame"
+                src={`${documentFileUrl}#page=${previewPage}&toolbar=0&navpanes=0&view=FitH`}
+                title={`${chunk.document_keyword || 'PDF'} 第 ${chunk.page} 页`}
+              />
+            ) : (
+              <>
+                {loading && <div className="evidence-state"><LoaderCircle size={20} className="spin" />正在加载页面...</div>}
+                {error && <div className="evidence-state error">{error}</div>}
+                {pageImage && !error && (
+                  <div className="evidence-page-wrap">
+                    <img src={pageImage.image} alt={`${chunk.document_keyword || 'PDF'} 第 ${chunk.page} 页`} />
+                    {boxStyle && <span className="evidence-bbox" style={boxStyle} />}
+                  </div>
+                )}
+              </>
             )}
           </div>
           <aside className="evidence-copy">
             <h3>命中段落</h3>
-            <p>{stripHtml(chunk.highlight || chunk.content)}</p>
+            <p>{renderMarkedText(chunk.highlight || chunk.content)}</p>
             <dl>
               <div><dt>block_id</dt><dd>{chunk.id || '-'}</dd></div>
               <div><dt>bbox</dt><dd>{chunk.bbox?.join(', ') || '-'}</dd></div>

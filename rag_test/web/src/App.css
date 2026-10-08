@@ -2501,3 +2501,55 @@ body { background: #f4f7f8; }
     overflow: visible;
   }
 }
+
+/* Keyword and difference highlighting in evidence views. */
+.source-item mark,
+.evidence-copy mark,
+.chat-review-list mark {
+  padding: 0 .12em;
+  color: inherit;
+  background: #ffe58f;
+  border-radius: 3px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.evidence-view-switch {
+  display: flex;
+  justify-content: flex-end;
+  gap: 5px;
+  margin: -4px 0 12px;
+}
+
+.evidence-view-switch button {
+  padding: 6px 10px;
+  color: #5e6e66;
+  background: rgba(255, 255, 255, .85);
+  border: 1px solid #d8e2dc;
+  border-radius: 8px;
+  font-size: 10px;
+}
+
+.evidence-view-switch button.active {
+  color: #1f654f;
+  background: #e8f5ef;
+  border-color: #b8dccc;
+  font-weight: 750;
+}
+
+.evidence-pdf-frame {
+  width: 100%;
+  height: calc(92vh - 158px);
+  min-height: 520px;
+  display: block;
+  background: #fff;
+  border: 0;
+  border-radius: 10px;
+}
+
+@media (max-width: 900px) {
+  .evidence-pdf-frame {
+    height: 68vh;
+    min-height: 440px;
+  }
+}
