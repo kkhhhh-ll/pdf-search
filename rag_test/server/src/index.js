@@ -5,7 +5,7 @@ import { readFile, unlink } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { existsSync, mkdirSync } from 'node:fs';
-import { createPdfSearchProvider } from './pdfsearch-provider.js';
+import { createRagFlowProvider } from './ragflow-provider.js';
 import { createLlmProvider } from './llm-provider.js';
 import { startIndexWorker } from './index-worker.js';
 import { reviewWordFile } from './word-review.js';
@@ -52,13 +52,17 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PORT = Number(process.env.PORT || 8787);
-const PDFSEARCH_BASE_URL = process.env.PDFSEARCH_BASE_URL || 'http://127.0.0.1:8000';
-const PDFSEARCH_API_KEY = process.env.PDFSEARCH_API_KEY || '';
+const RAGFLOW_BASE_URL = process.env.RAGFLOW_BASE_URL || 'http://127.0.0.1:9380';
+const RAGFLOW_API_KEY = process.env.RAGFLOW_API_KEY || '';
+const RAGFLOW_DATASET_ID = process.env.RAGFLOW_DATASET_ID || '';
+const ES_URL = process.env.ES_URL || 'http://127.0.0.1:1200';
+const ES_USER = process.env.ES_USER || 'elastic';
+const ES_PASSWORD = process.env.ES_PASSWORD || '';
 const CONSOLE_USER = process.env.CONSOLE_USER || 'admin';
 const CONSOLE_PASSWORD = process.env.CONSOLE_PASSWORD || 'admin';
 const SESSION_COOKIE = 'zhisuo_session';
 const CSRF_COOKIE = 'zhisuo_csrf';
-const VIRTUAL_DATASET_ID = 'pdfsearch';
+const VIRTUAL_DATASET_ID = 'knowledge';
 const UPLOAD_DIR = path.resolve(__dirname, '../../data/uploads');
 const UPLOAD_MAX_BYTES = Number(process.env.UPLOAD_MAX_BYTES || 500 * 1024 * 1024);
 
@@ -69,9 +73,14 @@ const upload = multer({
   dest: UPLOAD_DIR,
   limits: { fileSize: UPLOAD_MAX_BYTES },
 });
-const pdfsearch = createPdfSearchProvider({
-  baseUrl: PDFSEARCH_BASE_URL,
-  apiKey: PDFSEARCH_API_KEY,
+const documents = createRagFlowProvider({
+  baseUrl: RAGFLOW_BASE_URL,
+  apiKey: RAGFLOW_API_KEY,
+  datasetId: RAGFLOW_DATASET_ID,
+  esUrl: ES_URL,
+  esUser: ES_USER,
+  esPassword: ES_PASSWORD,
+  parseTimeoutMs: Number(process.env.RAGFLOW_PARSE_TIMEOUT_MS || 600000),
 });
 const llm = createLlmProvider({
   baseUrl: process.env.LLM_BASE_URL || '',
@@ -197,8 +206,8 @@ const uploadRateLimit = rateLimit({
 function datasetPayload(stats = {}) {
   return {
     id: VIRTUAL_DATASET_ID,
-    name: 'pdf-search 知识库',
-    description: '由 pdf-search FastAPI 提供检索能力',
+    name: 'RAGFlow 知识库',
+    description: '由 RAGFlow、PaddleOCR 和 BGE-M3 提供检索能力',
     document_count: stats.document_count || 0,
     chunk_count: stats.chunk_count || 0,
     done_count: stats.done_count || 0,
@@ -262,13 +271,13 @@ async function generateAnswer(question, exact, similar) {
       { role: 'user', content: `问题：${question}\n\n检索资料：\n${evidence}` },
     ]);
   }
-  if (!chunks.length) return '当前 pdf-search 知识库中没有找到相关内容。';
+  if (!chunks.length) return '当前 RAGFlow 知识库中没有找到相关内容。';
   const primary = chunks[0].content.slice(0, 1200);
   const extra = chunks
     .slice(1, 3)
     .map((chunk) => `- ${chunk.content.slice(0, 260)}`)
     .join('\n');
-  return `我在 pdf-search 中找到了以下相关内容：\n\n${primary}${extra ? `\n\n补充信息：\n${extra}` : ''}`;
+  return `我在 RAGFlow 知识库中找到了以下相关内容：\n\n${primary}${extra ? `\n\n补充信息：\n${extra}` : ''}`;
 }
 
 app.post('/api/auth/login', loginRateLimit, express.json({ limit: '16kb' }), async (req, res) => {
@@ -382,18 +391,18 @@ app.delete('/api/users/:userId', requireAdmin, async (req, res) => {
 app.get('/api/health', async (_req, res) => {
   const started = Date.now();
   try {
-    await Promise.all([pdfsearch.health(), checkDb()]);
+    await Promise.all([documents.health(), checkDb()]);
     return res.json({
       ok: true,
-      apiKeyConfigured: true,
+      apiKeyConfigured: Boolean(RAGFLOW_API_KEY),
       checks: [
         {
-          id: 'pdf-search',
-          label: 'pdf-search FastAPI',
+          id: 'ragflow',
+          label: 'RAGFlow 知识库',
           reachable: true,
           httpStatus: 200,
           latencyMs: Date.now() - started,
-          url: PDFSEARCH_BASE_URL,
+          url: RAGFLOW_BASE_URL,
           detail: '服务可达',
         },
       ],
@@ -401,15 +410,15 @@ app.get('/api/health', async (_req, res) => {
   } catch (error) {
     return res.json({
       ok: false,
-      apiKeyConfigured: true,
+      apiKeyConfigured: Boolean(RAGFLOW_API_KEY),
       checks: [
         {
-          id: 'pdf-search',
-          label: 'pdf-search FastAPI',
+          id: 'ragflow',
+          label: 'RAGFlow 知识库',
           reachable: false,
           httpStatus: null,
           latencyMs: Date.now() - started,
-          url: PDFSEARCH_BASE_URL,
+          url: RAGFLOW_BASE_URL,
           detail: String(error?.message || error),
         },
       ],
@@ -418,13 +427,13 @@ app.get('/api/health', async (_req, res) => {
 });
 
 app.get('/api/config', (_req, res) => {
-  res.json({ apiKeyConfigured: true, mode: 'pdfsearch' });
+  res.json({ apiKeyConfigured: Boolean(RAGFLOW_API_KEY), mode: 'ragflow' });
 });
 
 app.get('/api/setup', (_req, res) => {
   res.json({
-    links: { pdfsearchApi: PDFSEARCH_BASE_URL },
-    model: { embedding: 'BGE-M3', parser: 'pdf-search backend' },
+    links: { ragflowApi: RAGFLOW_BASE_URL },
+    model: { embedding: 'BGE-M3', parser: 'RAGFlow + PaddleOCR' },
   });
 });
 
@@ -499,7 +508,7 @@ app.delete('/api/documents/:documentId', requireSession, async (req, res) => {
   const document = await getDocument(req.zhisuoUser, req.params.documentId);
   if (!document) return res.status(404).json({ code: 404, message: 'document not found' });
   if (document.backendDocId) {
-    await pdfsearch.deleteDocument(document.backendDocId).catch(() => null);
+    await documents.deleteDocument(document.backendDocId).catch(() => null);
   }
   await unlink(document.storagePath).catch(() => null);
   await deleteDocument(req.zhisuoUser, document.id);
@@ -513,23 +522,32 @@ app.post('/api/ragflow/datasets/:datasetId/chunks', requireSession, async (req, 
   return res.json({ code: 0, data: documents.map(toFrontendDocument) });
 });
 
-app.get('/api/pdfsearch/documents/:docId/pages/:page/image', requireSession, async (req, res) => {
+app.get('/api/knowledge/documents/:docId/pages/:page/image', requireSession, async (req, res) => {
   try {
-    const payload = await pdfsearch.pageImage(req.params.docId, req.params.page);
+    const payload = await documents.pageImage(req.params.docId, req.params.page);
     return res.json({ code: 0, data: payload });
   } catch (error) {
     return res.status(error?.status || 502).json({ code: error?.status || 502, message: String(error?.message || error) });
   }
 });
 
-app.get('/api/pdfsearch/documents/:docId/blocks/:blockId', requireSession, async (req, res) => {
+app.get('/api/knowledge/documents/:docId/blocks/:blockId', requireSession, async (req, res) => {
   try {
-    const payload = await pdfsearch.block(req.params.docId, req.params.blockId);
+    const payload = await documents.block(req.params.docId, req.params.blockId);
     return res.json({ code: 0, data: payload });
   } catch (error) {
     return res.status(error?.status || 502).json({ code: error?.status || 502, message: String(error?.message || error) });
   }
 });
+app.get('/api/knowledge/documents/:docId/blocks/:blockId/image', requireSession, async (req, res) => {
+  try {
+    const payload = await documents.blockImage(req.params.docId, req.params.blockId);
+    return res.json({ code: 0, data: payload });
+  } catch (error) {
+    return res.status(error?.status || 502).json({ code: error?.status || 502, message: String(error?.message || error) });
+  }
+});
+
 
 app.get('/api/conversations', requireSession, async (req, res) => {
   try {
@@ -614,8 +632,8 @@ app.post('/api/chat', requireSession, chatRateLimit, async (req, res) => {
     const exactTerm = extractSearchTerm(cleanQuestion);
     const startedAt = Date.now();
     const [exactResult, hybridResult] = await Promise.allSettled([
-      pdfsearch.exact(exactTerm, 8),
-      pdfsearch.hybrid(cleanQuestion, 8),
+      documents.exact(exactTerm, 8),
+      documents.hybrid(cleanQuestion, 8),
     ]);
     const exactRaw = exactResult.status === 'fulfilled' ? exactResult.value?.results || [] : [];
     const similarRaw = hybridResult.status === 'fulfilled' ? hybridResult.value?.results || [] : [];
@@ -631,7 +649,7 @@ app.post('/api/chat', requireSession, chatRateLimit, async (req, res) => {
         : hybridResult.status === 'rejected'
           ? hybridResult.reason?.message
           : '没有检索到相关内容';
-      answer = `没有在 pdf-search 中找到相关内容。${reason ? `（${reason}）` : ''}`;
+      answer = `没有在 RAGFlow 知识库中找到相关内容。${reason ? `（${reason}）` : ''}`;
     } else {
       try {
         answer = await generateAnswer(cleanQuestion, exactRaw, similarRaw);
@@ -742,8 +760,8 @@ app.post('/api/chat/stream', requireSession, chatRateLimit, async (req, res) => 
 
     const exactTerm = extractSearchTerm(cleanQuestion);
     const [exactResult, hybridResult] = await Promise.allSettled([
-      pdfsearch.exact(exactTerm, 8),
-      pdfsearch.hybrid(cleanQuestion, 8),
+      documents.exact(exactTerm, 8),
+      documents.hybrid(cleanQuestion, 8),
     ]);
     const exactRaw = exactResult.status === 'fulfilled' ? exactResult.value?.results || [] : [];
     const similarRaw = hybridResult.status === 'fulfilled' ? hybridResult.value?.results || [] : [];
@@ -772,10 +790,10 @@ ${evidence}` },
       }, { signal: abortController.signal });
     } else {
       answer = chunks.length
-        ? `我在 pdf-search 中找到了以下相关内容：
+        ? `我在 RAGFlow 知识库中找到了以下相关内容：
 
 ${chunks[0].content.slice(0, 1200)}`
-        : '没有在 pdf-search 中找到相关内容。';
+        : '没有在 RAGFlow 知识库中找到相关内容。';
       streamedAnswer = answer;
       send('token', { token: answer });
     }
@@ -865,7 +883,7 @@ app.post('/api/chat/word-review', requireSession, uploadRateLimit, upload.single
     });
 
     task = await createReviewTask(req.zhisuoUser, file.originalname);
-    const result = await reviewWordFile({ filePath: file.path, pdfsearch, llm });
+    const result = await reviewWordFile({ filePath: file.path, documents, llm });
     await addReviewIssues(task.id, result.issues);
     task = await updateReviewTask(req.zhisuoUser, task.id, {
       status: 'done',
@@ -922,7 +940,7 @@ app.post('/api/review/word', requireSession, uploadRateLimit, upload.single('fil
   }
   let task = await createReviewTask(req.zhisuoUser, file.originalname);
   try {
-    const result = await reviewWordFile({ filePath: file.path, pdfsearch, llm });
+    const result = await reviewWordFile({ filePath: file.path, documents, llm });
     await addReviewIssues(task.id, result.issues);
     task = await updateReviewTask(req.zhisuoUser, task.id, {
       status: 'done',
@@ -967,5 +985,5 @@ if (existsSync(webDist)) {
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`[zhisuo] gateway listening on http://127.0.0.1:${PORT}`);
-  console.log(`[zhisuo] pdf-search: ${PDFSEARCH_BASE_URL}`);
+  console.log(`[zhisuo] RAGFlow: ${RAGFLOW_BASE_URL}`);
 });

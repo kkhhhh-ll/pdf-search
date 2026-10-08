@@ -40,8 +40,13 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-zhisuo}:${POSTGRES_PASSWORD:-zhisuo}@postgres:5432/${POSTGRES_DB:-zhisuo}
       CONSOLE_USER: ${CONSOLE_USER:-admin}
       CONSOLE_PASSWORD: ${CONSOLE_PASSWORD:-change-me-strong}
-      PDFSEARCH_BASE_URL: ${PDFSEARCH_BASE_URL}
-      PDFSEARCH_API_KEY: ${PDFSEARCH_API_KEY:-}
+      RAGFLOW_BASE_URL: ${RAGFLOW_BASE_URL:-http://host.docker.internal:9380}
+      RAGFLOW_API_KEY: ${RAGFLOW_API_KEY}
+      RAGFLOW_DATASET_ID: ${RAGFLOW_DATASET_ID}
+      ES_URL: ${ES_URL:-http://host.docker.internal:1200}
+      ES_USER: ${ES_USER:-elastic}
+      ES_PASSWORD: ${ES_PASSWORD}
+      RAGFLOW_PARSE_TIMEOUT_MS: ${RAGFLOW_PARSE_TIMEOUT_MS:-600000}
       LLM_BASE_URL: ${LLM_BASE_URL:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_MODEL: ${LLM_MODEL:-}

@@ -1,9 +1,21 @@
-import { createPdfSearchProvider } from './pdfsearch-provider.js';
+import { createRagFlowProvider } from './ragflow-provider.js';
 import { claimNextQueuedDocument, updateDocument } from './document-store.js';
 
-const PDFSEARCH_BASE_URL = process.env.PDFSEARCH_BASE_URL || 'http://127.0.0.1:8000';
-const PDFSEARCH_API_KEY = process.env.PDFSEARCH_API_KEY || '';
-const worker = createPdfSearchProvider({ baseUrl: PDFSEARCH_BASE_URL, apiKey: PDFSEARCH_API_KEY });
+const RAGFLOW_BASE_URL = process.env.RAGFLOW_BASE_URL || 'http://127.0.0.1:9380';
+const RAGFLOW_API_KEY = process.env.RAGFLOW_API_KEY || '';
+const RAGFLOW_DATASET_ID = process.env.RAGFLOW_DATASET_ID || '';
+const ES_URL = process.env.ES_URL || 'http://127.0.0.1:1200';
+const ES_USER = process.env.ES_USER || 'elastic';
+const ES_PASSWORD = process.env.ES_PASSWORD || '';
+const worker = createRagFlowProvider({
+  baseUrl: RAGFLOW_BASE_URL,
+  apiKey: RAGFLOW_API_KEY,
+  datasetId: RAGFLOW_DATASET_ID,
+  esUrl: ES_URL,
+  esUser: ES_USER,
+  esPassword: ES_PASSWORD,
+  parseTimeoutMs: Number(process.env.RAGFLOW_PARSE_TIMEOUT_MS || 600000),
+});
 
 export function startIndexWorker({ intervalMs = 2000 } = {}) {
   let running = false;

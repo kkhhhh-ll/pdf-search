@@ -220,7 +220,7 @@ function attachCandidateEvidence(issues, candidatesByParagraph) {
   return issues;
 }
 
-export async function reviewWordFile({ filePath, pdfsearch, llm }) {
+export async function reviewWordFile({ filePath, documents, llm }) {
   const paragraphs = await extractParagraphs(filePath);
   const internalIssues = internalRules(paragraphs);
   const issues = [...internalIssues];
@@ -230,7 +230,7 @@ export async function reviewWordFile({ filePath, pdfsearch, llm }) {
     if (paragraph.length < 6) continue;
     let candidates = [];
     try {
-      const retrieval = await pdfsearch.hybrid(paragraph, 5);
+      const retrieval = await documents.hybrid(paragraph, 5);
       candidates = retrieval?.results || [];
     } catch {
       candidates = [];

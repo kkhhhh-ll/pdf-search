@@ -756,7 +756,7 @@ function App() {
       highlight: issue.evidenceText || issue.sourceText,
       document_id: issue.docId,
       document_keyword: issue.fileName || issue.docId,
-      dataset_id: 'pdfsearch',
+      dataset_id: 'knowledge',
       similarity: issue.confidence,
       term_similarity: issue.confidence,
       vector_similarity: issue.confidence,
@@ -1368,7 +1368,10 @@ function PdfEvidenceModal({ chunk, onClose }: { chunk: Chunk; onClose: () => voi
     }
     setLoading(true);
     setError('');
-    csrfFetch(`/api/pdfsearch/documents/${encodeURIComponent(chunk.document_id)}/pages/${encodeURIComponent(String(chunk.page))}/image`)
+    const imagePath = chunk.id
+      ? `/api/knowledge/documents/${encodeURIComponent(chunk.document_id)}/blocks/${encodeURIComponent(chunk.id)}/image`
+      : `/api/knowledge/documents/${encodeURIComponent(chunk.document_id)}/pages/${encodeURIComponent(String(chunk.page))}/image`;
+    csrfFetch(imagePath)
       .then(async (response) => {
         const payload = await response.json().catch(() => null);
         if (!response.ok || payload?.code !== 0) {
