@@ -65,6 +65,8 @@ const CSRF_COOKIE = 'zhisuo_csrf';
 const VIRTUAL_DATASET_ID = 'knowledge';
 const UPLOAD_DIR = path.resolve(__dirname, '../../data/uploads');
 const UPLOAD_MAX_BYTES = Number(process.env.UPLOAD_MAX_BYTES || 500 * 1024 * 1024);
+const USER_MANAGEMENT_ENABLED = process.env.USER_MANAGEMENT_ENABLED !== 'false';
+const COOKIE_SECURE = process.env.NODE_ENV === 'production' || process.env.COOKIE_SECURE === 'true';
 
 mkdirSync(UPLOAD_DIR, { recursive: true });
 
@@ -107,7 +109,7 @@ function createCsrfToken() {
 function setCsrfCookie(res, token = createCsrfToken()) {
   res.setHeader(
     'Set-Cookie',
-    `${CSRF_COOKIE}=${token}; SameSite=Lax; Path=/; Max-Age=604800`,
+    `${CSRF_COOKIE}=${token}; SameSite=Lax; Path=/; Max-Age=604800${COOKIE_SECURE ? '; Secure' : ''}`,
   );
   return token;
 }
@@ -290,7 +292,7 @@ app.post('/api/auth/login', loginRateLimit, express.json({ limit: '16kb' }), asy
     const { token } = await createAuthSession(user.id);
     await touchLastLogin(user.id);
     const csrfToken = setCsrfCookie(res);
-    res.append('Set-Cookie', `${SESSION_COOKIE}=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800`);
+    res.append('Set-Cookie', `${SESSION_COOKIE}=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800${COOKIE_SECURE ? '; Secure' : ''}`);
     return res.json({ code: 0, data: { username: user.username, role: user.role } });
   } catch (error) {
     return res.status(500).json({ code: 500, message: String(error?.message || error) });
@@ -310,8 +312,8 @@ app.get('/api/auth/session', async (req, res) => {
 
 app.post('/api/auth/logout', async (req, res) => {
   await deleteAuthSession(sessionToken(req)).catch(() => null);
-  res.append('Set-Cookie', `${SESSION_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`);
-  res.append('Set-Cookie', `${CSRF_COOKIE}=; SameSite=Lax; Path=/; Max-Age=0`);
+  res.append('Set-Cookie', `${SESSION_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${COOKIE_SECURE ? '; Secure' : ''}`);
+  res.append('Set-Cookie', `${CSRF_COOKIE}=; SameSite=Lax; Path=/; Max-Age=0${COOKIE_SECURE ? '; Secure' : ''}`);
   return res.json({ code: 0 });
 });
 
@@ -427,7 +429,11 @@ app.get('/api/health', async (_req, res) => {
 });
 
 app.get('/api/config', (_req, res) => {
-  res.json({ apiKeyConfigured: Boolean(RAGFLOW_API_KEY), mode: 'ragflow' });
+  res.json({
+    apiKeyConfigured: Boolean(RAGFLOW_API_KEY),
+    mode: 'ragflow',
+    userManagementEnabled: USER_MANAGEMENT_ENABLED,
+  });
 });
 
 app.get('/api/setup', (_req, res) => {

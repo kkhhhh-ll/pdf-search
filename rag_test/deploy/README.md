@@ -13,6 +13,7 @@ cp .env.prod.example .env
 DOMAIN
 POSTGRES_PASSWORD
 CONSOLE_PASSWORD
+USER_MANAGEMENT_ENABLED
 RAGFLOW_BASE_URL
 RAGFLOW_API_KEY
 RAGFLOW_DATASET_ID
@@ -23,6 +24,39 @@ LLM_BASE_URL
 LLM_API_KEY
 LLM_MODEL
 ```
+
+## 服务器前置条件
+
+```text
+Linux 服务器
+Docker + Docker Compose
+域名已解析到服务器公网 IP
+开放 80/443
+RAGFlow 服务可从宿主机访问
+```
+
+RAGFlow 至少需要暴露：
+
+```text
+9380  RAGFlow API
+1200  Elasticsearch
+```
+
+如果 RAGFlow 与 BFF 不在同一台服务器，把 `.env` 中的 `host.docker.internal` 改成 RAGFlow 的实际内网地址。
+
+## 完整启动顺序
+
+1. 启动 RAGFlow、TEI、Elasticsearch。
+2. 应用 `rag_test/deploy/ragflow/embedding-timeout.patch`。
+3. 在 RAGFlow 中创建 API Key 和知识库。
+4. 填写 `rag_test/deploy/.env`。
+5. 启动 BFF：
+
+```bash
+docker compose --env-file .env -f docker-compose.prod.yml up -d --build
+```
+
+6. 浏览器访问 `https://你的 DOMAIN`。
 
 ## 启动
 
@@ -38,8 +72,10 @@ https://你的 DOMAIN
 
 ## 说明
 
-- PostgreSQL 和 Qdrant 由 Compose 管理。
+- PostgreSQL 由 Compose 管理。
+- 上传文件保存在 `app-data` 持久化卷中。
 - `RAGFLOW_*` 指向我们自己的 RAGFlow 服务和知识库。
+- `USER_MANAGEMENT_ENABLED=false` 时隐藏控制台中的用户管理。
 - `ES_*` 用于 RAGFlow 精确检索。
 - LLM 通过 `LLM_BASE_URL` 调用。
 - Caddy 自动申请和续期 HTTPS 证书。

@@ -215,6 +215,7 @@ function App() {
   const [authState, setAuthState] = useState<AuthState>('checking');
   const [consoleUser, setConsoleUser] = useState('');
   const [consoleRole, setConsoleRole] = useState<'admin' | 'member'>('member');
+  const [userManagementEnabled, setUserManagementEnabled] = useState(false);
   const [users, setUsers] = useState<UserAccount[]>([]);
   const [userLoading, setUserLoading] = useState(false);
   const [userError, setUserError] = useState('');
@@ -299,6 +300,16 @@ function App() {
       }
     } catch {
       setAuthState('anonymous');
+    }
+  }, []);
+
+  const refreshConfig = useCallback(async () => {
+    try {
+      const response = await csrfFetch('/api/config');
+      const payload = await response.json().catch(() => null);
+      setUserManagementEnabled(Boolean(payload?.userManagementEnabled));
+    } catch {
+      setUserManagementEnabled(false);
     }
   }, []);
 
@@ -405,10 +416,11 @@ function App() {
 
   useEffect(() => {
     if (authState !== 'authenticated') return;
+    void refreshConfig();
     void refreshHealth();
     void refreshDatasets();
     void refreshConversations();
-  }, [authState, refreshConversations, refreshDatasets, refreshHealth]);
+  }, [authState, refreshConfig, refreshConversations, refreshDatasets, refreshHealth]);
 
   useEffect(() => {
     if (authState !== 'authenticated' || !selectedDatasetId) return;
@@ -481,8 +493,8 @@ function App() {
   }, [consoleRole]);
 
   useEffect(() => {
-    if (authState === 'authenticated' && consoleRole === 'admin') void refreshUsers();
-  }, [authState, consoleRole, refreshUsers]);
+    if (authState === 'authenticated' && consoleRole === 'admin' && userManagementEnabled) void refreshUsers();
+  }, [authState, consoleRole, refreshUsers, userManagementEnabled]);
 
   const createUserAccount = async () => {
     if (!newUsername.trim() || !newPassword) return;
@@ -1168,6 +1180,7 @@ function App() {
           onRefresh={() => void refreshHealth()}
           onLogout={() => void logout()}
           onClose={() => setSystemOpen(false)}
+          showUserManagement={userManagementEnabled}
         />
       )}
 
@@ -1543,6 +1556,7 @@ function SystemDrawer({
   onRefresh,
   onLogout,
   onClose,
+  showUserManagement,
 }: {
   health: HealthPayload | null;
   username: string;
@@ -1562,6 +1576,7 @@ function SystemDrawer({
   onRefresh: () => void;
   onLogout: () => void;
   onClose: () => void;
+  showUserManagement: boolean;
 }) {
   return (
     <div className="drawer-backdrop" onClick={onClose}>
