@@ -30,6 +30,52 @@ function identifierPrefixes(query) {
   return [...new Set(prefixes)].slice(0, 32);
 }
 
+const QUERY_STOPWORDS = [
+  '帮我', '帮忙', '请', '麻烦', '搜索', '查找', '检索', '查询', '查一下', '找一下',
+  '相关的信息', '相关信息', '相关', '信息', '有哪些', '哪些', '什么', '怎么', '如何',
+  '不存在的', '不存在', '关键词', '一下', '当前', '主要', '内容', '的', '了', '是', '在', '有', '吗', '呢',
+];
+
+function normalizeMatchText(value) {
+  return String(value || '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[\s\p{P}\p{S}]+/gu, '');
+}
+
+function significantTerms(query) {
+  let value = String(query || '').normalize('NFKC').toLowerCase();
+  for (const stopword of QUERY_STOPWORDS) value = value.split(stopword).join(' ');
+  const terms = new Set();
+  for (const token of value.match(/[a-z0-9]{2,}|[\u3400-\u9fff]{2,}/g) || []) {
+    if (/^[a-z0-9]+$/i.test(token)) {
+      terms.add(token);
+      continue;
+    }
+    if (token.length <= 2) terms.add(token);
+    else {
+      for (let index = 0; index < token.length - 1; index += 1) {
+        terms.add(token.slice(index, index + 2));
+      }
+    }
+  }
+  return [...terms];
+}
+
+function filterRelevantResults(query, results) {
+  const text = String(query || '').trim();
+  if (!text) return [];
+  if (/总结|概括|概述|主要内容|介绍一下/u.test(text)) return results;
+  const terms = significantTerms(text);
+  if (!terms.length) return [];
+  const required = Math.min(2, terms.length);
+  return results.filter((result) => {
+    const content = normalizeMatchText(result.text || result.highlight || '');
+    const matched = terms.reduce((count, term) => count + (content.includes(term) ? 1 : 0), 0);
+    return matched >= required;
+  });
+}
+
 function firstPosition(positions = []) {
   const value = Array.isArray(positions[0]) ? positions[0] : positions;
   if (!Array.isArray(value) || !value.length) return null;
@@ -225,7 +271,7 @@ export function createRagFlowProvider({
         vector_similarity: 0,
       };
     });
-    return { results: await filterDeleted(results) };
+    return { results: await filterDeleted(filterRelevantResults(query, results)) };
   }
 
   async function hybrid(query, topK = 8) {
@@ -244,7 +290,7 @@ export function createRagFlowProvider({
       }),
     });
     const results = (payload?.data?.chunks || []).map(resultFromChunk);
-    return { results: await filterDeleted(results) };
+    return { results: await filterDeleted(filterRelevantResults(query, results)) };
   }
 
   async function listDocumentChunks(documentId, pageSize = 100) {
