@@ -41,7 +41,8 @@ RAGFLOW_DATASET_ID=
 ES_URL=http://127.0.0.1:1200
 ES_USER=elastic
 ES_PASSWORD=infini_rag_flow
-RAGFLOW_PARSE_TIMEOUT_MS=600000
+RAGFLOW_PARSE_TIMEOUT_MS=3600000
+RAGFLOW_PDF_PART_PAGES=30
 
 LLM_BASE_URL=https://api.deepseek.com/v1
 LLM_API_KEY=sk-xxxx
@@ -49,9 +50,24 @@ LLM_MODEL=deepseek-flash
 LLM_TIMEOUT_MS=120000
 
 UPLOAD_MAX_BYTES=524288000
+INDEX_WORKER_CONCURRENCY=2
 ```
 
 `RAGFLOW_DATASET_ID` 留空时，BFF 会选择 RAGFlow 中的第一个知识库。
+
+## 大文件和批量上传
+
+BFF 支持多个 PDF 同时进入队列，并按 `INDEX_WORKER_CONCURRENCY` 并发索引。
+
+为避免单个 PDF 长期占用任务，BFF 会自动按 `RAGFLOW_PDF_PART_PAGES` 分卷上传：
+
+```env
+RAGFLOW_PDF_PART_PAGES=30
+RAGFLOW_PARSE_TIMEOUT_MS=3600000
+INDEX_WORKER_CONCURRENCY=2
+```
+
+结果里的页码会自动映射回原始 PDF，例如第 2 卷的第 1 页会显示为原文件第 31 页。删除原文件时，所有分卷会一起删除。
 
 ## 启动 RAGFlow
 

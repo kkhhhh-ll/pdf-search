@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { PDFDocument } from 'pdf-lib';
 
 function joinUrl(baseUrl, path) {
   return `${String(baseUrl || '').replace(/\/+$/, '')}/${String(path || '').replace(/^\/+/, '')}`;
@@ -40,13 +41,39 @@ function firstPosition(positions = []) {
   return { page, bbox: [] };
 }
 
+function parsePartName(value) {
+  const match = String(value || '').match(/^(.*?)__zhisuo_part_(\d+)__p(\d+)-(\d+)\.pdf$/i);
+  if (!match) return null;
+  return {
+    originalName: `${match[1]}.pdf`,
+    part: Number(match[2]),
+    pageStart: Number(match[3]),
+    pageEnd: Number(match[4]),
+  };
+}
+
+function partName(fileName, part, pageStart, pageEnd) {
+  const base = String(fileName || 'document.pdf').replace(/\.pdf$/i, '');
+  return `${base}__zhisuo_part_${String(part).padStart(3, '0')}__p${pageStart}-${pageEnd}.pdf`;
+}
+
+function mapPartPage(fileName, page) {
+  const part = parsePartName(fileName);
+  return {
+    fileName: part?.originalName || fileName || '',
+    page: part && page ? page + part.pageStart - 1 : page,
+    part,
+  };
+}
+
 function resultFromChunk(chunk = {}) {
   const position = firstPosition(chunk.positions || chunk.position_int || []);
   const text = chunk.content || chunk.content_with_weight || chunk.highlight || '';
+  const mapped = mapPartPage(chunk.document_keyword || chunk.docnm_kwd || '', position?.page || 0);
   return {
     doc_id: chunk.document_id || chunk.doc_id || '',
-    file_name: chunk.document_keyword || chunk.docnm_kwd || '',
-    page: position?.page || 0,
+    file_name: mapped.fileName,
+    page: mapped.page,
     block_id: chunk.id || chunk.chunk_id || chunk._id || '',
     section: chunk.section || '',
     text,
@@ -180,10 +207,13 @@ export function createRagFlowProvider({
     const maxScore = Math.max(...hits.map((hit) => Number(hit._score) || 0), 1);
     const results = hits.map((hit) => {
       const source = hit._source || {};
+      const sourceName = source.docnm_kwd || source.document_keyword || '';
+      const sourcePosition = firstPosition(source.position_int || source.positions || [])?.page || 0;
+      const mapped = mapPartPage(sourceName, sourcePosition);
       return {
         doc_id: source.doc_id || source.document_id || '',
-        file_name: source.docnm_kwd || source.document_keyword || '',
-        page: firstPosition(source.position_int || source.positions || [])?.page || 0,
+        file_name: mapped.fileName,
+        page: mapped.page,
         block_id: source.id || hit._id || '',
         section: source.section || '',
         text: source.content_with_weight || source.content || '',
@@ -260,8 +290,8 @@ export function createRagFlowProvider({
     );
     const chunk = payload?.data;
     if (!chunk || chunk === false) throw new Error('RAGFlow 分片不存在');
-    const page = firstPosition(chunk.positions || chunk.position_int || [])?.page || 0;
-    return imageResponse(chunk.img_id || chunk.image_id, documentId, page);
+    const mapped = mapPartPage(chunk.docnm_kwd || chunk.document_keyword || '', firstPosition(chunk.positions || chunk.position_int || [])?.page || 0);
+    return imageResponse(chunk.img_id || chunk.image_id, documentId, mapped.page);
   }
 
   async function block(documentId, blockId) {
@@ -271,24 +301,39 @@ export function createRagFlowProvider({
     );
     const chunk = payload?.data;
     if (!chunk || chunk === false) throw new Error('RAGFlow 分片不存在');
+    const chunkName = chunk.docnm_kwd || chunk.document_keyword || '';
+    const mapped = mapPartPage(chunkName, firstPosition(chunk.positions || chunk.position_int || [])?.page || 0);
     return {
       doc_id: documentId,
-      file_name: chunk.docnm_kwd || chunk.document_keyword || '',
+      file_name: mapped.fileName,
       block_id: chunk.id || blockId,
       section: chunk.section || '',
-      page: firstPosition(chunk.positions || chunk.position_int || [])?.page || 0,
+      page: mapped.page,
       bbox: [],
       text: chunk.content || chunk.content_with_weight || '',
     };
   }
 
+  function documentIds(value) {
+    try {
+      const parsed = JSON.parse(String(value || ''));
+      if (Array.isArray(parsed)) return parsed.filter(Boolean);
+    } catch {
+      // Backward-compatible single document id.
+    }
+    return value ? [value] : [];
+  }
+
   async function deleteDocument(documentId) {
     const id = await resolveDatasetId();
-    await request(`/api/v1/datasets/${encodeURIComponent(id)}/documents`, {
-      method: 'DELETE',
-      body: JSON.stringify({ ids: [documentId], delete_all: false }),
-    });
-    return { doc_id: documentId, deleted: true };
+    const ids = documentIds(documentId);
+    if (ids.length) {
+      await request(`/api/v1/datasets/${encodeURIComponent(id)}/documents`, {
+        method: 'DELETE',
+        body: JSON.stringify({ ids, delete_all: false }),
+      });
+    }
+    return { doc_id: documentId, deleted: true, count: ids.length };
   }
 
   async function waitForDocument(documentId) {
@@ -306,9 +351,8 @@ export function createRagFlowProvider({
     throw new Error('RAGFlow 文档解析超时');
   }
 
-  async function indexDocument(filePath, fileName) {
+  async function uploadPdf(buffer, fileName) {
     const id = await resolveDatasetId();
-    const buffer = await readFile(filePath);
     const form = new FormData();
     form.append('file', new Blob([buffer], { type: 'application/pdf' }), fileName);
     const uploaded = await request(`/api/v1/datasets/${encodeURIComponent(id)}/documents`, {
@@ -316,7 +360,7 @@ export function createRagFlowProvider({
       body: form,
     });
     const doc = Array.isArray(uploaded?.data) ? uploaded.data[0] : uploaded?.data;
-    if (!doc?.id) throw new Error('RAGFlow 上传文档失败');
+    if (!doc?.id) throw new Error(`RAGFlow 上传文档失败: ${fileName}`);
     await request(`/api/v1/datasets/${encodeURIComponent(id)}/documents/parse`, {
       method: 'POST',
       body: JSON.stringify({ document_ids: [doc.id] }),
@@ -328,6 +372,46 @@ export function createRagFlowProvider({
       chunk_count: Number(parsed.chunk_count || 0),
       run: parsed.run,
     };
+  }
+
+  async function indexDocument(filePath, fileName) {
+    const buffer = await readFile(filePath);
+    const partPages = Math.max(1, Number(process.env.RAGFLOW_PDF_PART_PAGES || 30));
+    const source = await PDFDocument.load(buffer, { ignoreEncryption: true });
+    const totalPages = source.getPageCount();
+    const prepared = [];
+
+    for (let start = 0; start < totalPages; start += partPages) {
+      const end = Math.min(totalPages, start + partPages);
+      const part = await PDFDocument.create();
+      const pages = await part.copyPages(source, Array.from({ length: end - start }, (_, i) => start + i));
+      pages.forEach((page) => part.addPage(page));
+      const bytes = Buffer.from(await part.save());
+      prepared.push({
+        buffer: bytes,
+        name: partName(fileName, prepared.length + 1, start + 1, end),
+      });
+    }
+
+    const indexed = [];
+    try {
+      for (const item of prepared) {
+        const result = await uploadPdf(item.buffer, item.name);
+        indexed.push(result);
+      }
+      return {
+        doc_id: JSON.stringify(indexed.map((item) => item.doc_id)),
+        file_name: fileName,
+        chunk_count: indexed.reduce((sum, item) => sum + item.chunk_count, 0),
+        run: 'DONE',
+        parts: indexed,
+      };
+    } catch (error) {
+      if (indexed.length) {
+        await deleteDocument(JSON.stringify(indexed.map((item) => item.doc_id))).catch(() => null);
+      }
+      throw error;
+    }
   }
 
   async function health() {

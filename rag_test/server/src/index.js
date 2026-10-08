@@ -80,7 +80,7 @@ const documents = createRagFlowProvider({
   esUrl: ES_URL,
   esUser: ES_USER,
   esPassword: ES_PASSWORD,
-  parseTimeoutMs: Number(process.env.RAGFLOW_PARSE_TIMEOUT_MS || 600000),
+  parseTimeoutMs: Number(process.env.RAGFLOW_PARSE_TIMEOUT_MS || 3600000),
 });
 const llm = createLlmProvider({
   baseUrl: process.env.LLM_BASE_URL || '',
