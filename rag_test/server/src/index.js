@@ -283,6 +283,26 @@ async function generateAnswer(question, exact, similar) {
   return `我在 RAGFlow 知识库中找到了以下相关内容：\n\n${primary}${extra ? `\n\n补充信息：\n${extra}` : ''}`;
 }
 
+const UNSUPPORTED_FEATURE_PATTERN = /(订机票|订酒店|酒店预订|点外卖|外卖|打车|导航|实时天气|天气查询|查股票|股票行情|基金行情|日程安排|设置提醒|发送邮件|发邮件|打电话|语音通话|视频通话|联网搜索|上网搜索|网页搜索|生成\s*(?:PPT|幻灯片|视频|图片|图像|海报)|做\s*(?:PPT|幻灯片)|画图|绘图|运行代码|执行代码|写代码|翻译文件)/i;
+
+async function answerWithoutEvidence(question) {
+  const fallback = '当前知识库中没有找到相关内容。';
+  if (UNSUPPORTED_FEATURE_PATTERN.test(String(question || ''))) return '该功能目前尚未提供。';
+  if (!llm.enabled) return fallback;
+  try {
+    const answer = await llm.complete([
+      {
+        role: 'system',
+        content: '判断用户问题是否在询问当前系统尚未提供的功能、服务或能力。若是，只回答“该功能目前尚未提供。”；若不是，只回答“当前知识库中没有找到相关内容。”。不要回答其他内容，不要编造。',
+      },
+      { role: 'user', content: String(question || '') },
+    ], { temperature: 0, maxTokens: 80 });
+    return String(answer || '').trim() || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 app.post('/api/auth/login', loginRateLimit, express.json({ limit: '16kb' }), async (req, res) => {
   try {
     const { username, password } = req.body || {};
@@ -669,7 +689,8 @@ app.post('/api/chat', requireSession, chatRateLimit, async (req, res) => {
         : hybridResult.status === 'rejected'
           ? hybridResult.reason?.message
           : '没有检索到相关内容';
-      answer = `没有在 RAGFlow 知识库中找到相关内容。${reason ? `（${reason}）` : ''}`;
+      answer = await answerWithoutEvidence(cleanQuestion);
+      if (reason && answer === '当前知识库中没有找到相关内容。') answer += `（${reason}）`;
     } else {
       try {
         answer = await generateAnswer(cleanQuestion, exactRaw, similarRaw);
@@ -808,12 +829,14 @@ ${evidence}` },
         streamedAnswer += token;
         send('token', { token });
       }, { signal: abortController.signal });
+    } else if (!chunks.length && llm.enabled) {
+      answer = await answerWithoutEvidence(cleanQuestion);
+      streamedAnswer = answer;
+      send('token', { token: answer });
     } else {
-      answer = chunks.length
-        ? `我在 RAGFlow 知识库中找到了以下相关内容：
+      answer = `我在 RAGFlow 知识库中找到了以下相关内容：
 
-${chunks[0].content.slice(0, 1200)}`
-        : '没有在 RAGFlow 知识库中找到相关内容。';
+${chunks[0].content.slice(0, 1200)}`;
       streamedAnswer = answer;
       send('token', { token: answer });
     }
