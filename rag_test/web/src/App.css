@@ -2456,3 +2456,48 @@ body { background: #f4f7f8; }
     padding-right: 10px;
   }
 }
+
+/* Evidence modal must keep its body inside the viewport. */
+.evidence-modal {
+  display: flex;
+  flex-direction: column;
+}
+
+.evidence-modal-header {
+  flex: 0 0 auto;
+}
+
+.evidence-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: calc(92vh - 88px);
+  overflow: hidden;
+}
+
+.evidence-page-preview,
+.evidence-copy {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+@media (max-width: 900px) {
+  .evidence-modal-body {
+    display: block;
+    max-height: calc(92vh - 88px);
+    overflow-y: auto;
+  }
+
+  .evidence-page-preview,
+  .evidence-copy {
+    overflow: visible;
+  }
+
+  .evidence-page-preview {
+    max-height: none;
+  }
+
+  .evidence-copy {
+    overflow: visible;
+  }
+}
