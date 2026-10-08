@@ -102,6 +102,39 @@ function internalRules(paragraphs) {
   return issues;
 }
 
+const METRIC_LABELS = ['国内市场占有率', '市场占有率', '资产负债率', '研发投入占比', '研发投入', '营业收入', '销售收入'];
+
+function internalMetricRules(paragraphs) {
+  const groups = new Map();
+  paragraphs.forEach((paragraph, index) => {
+    for (const label of METRIC_LABELS) {
+      const start = paragraph.indexOf(label);
+      if (start < 0) continue;
+      const tail = paragraph.slice(start, start + 180);
+      const values = [...tail.matchAll(/(\d+(?:\.\d+)?)\s*[%％]/g)].map((match) => `${match[1]}%`);
+      if (!values.length) continue;
+      const key = `${label}:${values.join('|')}`;
+      if (!groups.has(label)) groups.set(label, []);
+      groups.get(label).push({ index, paragraph, values, key });
+    }
+  });
+
+  const issues = [];
+  for (const [label, occurrences] of groups.entries()) {
+    const uniqueValues = [...new Set(occurrences.flatMap((item) => item.values))];
+    if (uniqueValues.length < 2) continue;
+    for (const occurrence of occurrences) {
+      issues.push(makeIssue('data_inconsistency', occurrence.index, occurrence.paragraph, {
+        severity: 'high',
+        suggestion: `请核对并统一“${label}”对应的数据，当前文档中出现了 ${uniqueValues.join('、')} 等多个值。`,
+        reason: `同一指标“${label}”在文档前后出现多个不同数值：${uniqueValues.join('、')}。`,
+        confidence: 0.9,
+      }));
+    }
+  }
+  return issues;
+}
+
 function candidateRules(paragraph, paragraphIndex, candidates) {
   const issues = [];
   const sourceClaims = numericClaims(paragraph);
@@ -220,29 +253,81 @@ function attachCandidateEvidence(issues, candidatesByParagraph) {
   return issues;
 }
 
+function paragraphPriority(paragraph, index, priorityIndexes) {
+  if (priorityIndexes.has(index)) return 1000 - index * 0.001;
+  const value = String(paragraph || '').trim();
+  if (value.length < 8 || value.length > 1200) return -1;
+  if (/^[\d\s%.,，。；;、:：()（）\-/]+$/.test(value)) return -1;
+
+  let score = Math.min(value.length, 300) / 20;
+  if (/\d/.test(value)) score += 24;
+  if (/(取得|认证|联合|制造|工艺|表述|单位|不一致|相当|相当于|等奖|年版|年度|市场占有率|营业收入|研发|专利|标准|体系|能力|资质|错误|异常)/.test(value)) score += 36;
+  if (/^[一二三四五六七八九十]+[、.．]/.test(value) && value.length < 28) score -= 20;
+  return score;
+}
+
+function selectReviewParagraphs(paragraphs, internalIssues, maxParagraphs) {
+  const priorityIndexes = new Set(internalIssues.map((issue) => issue.paragraphIndex));
+  return paragraphs
+    .map((paragraph, index) => ({ paragraph, index, score: paragraphPriority(paragraph, index, priorityIndexes) }))
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .slice(0, maxParagraphs)
+    .sort((a, b) => a.index - b.index);
+}
+
 export async function reviewWordFile({ filePath, documents, llm }) {
   const paragraphs = await extractParagraphs(filePath);
-  const internalIssues = internalRules(paragraphs);
+  const internalIssues = [...internalRules(paragraphs), ...internalMetricRules(paragraphs)];
   const issues = [...internalIssues];
+  const pdfEvidenceEnabled = process.env.WORD_REVIEW_PDF_EVIDENCE === 'true';
+  if (!pdfEvidenceEnabled) {
+    return {
+      paragraphs,
+      issues: dedupeIssues(issues),
+      stats: {
+        paragraphCount: paragraphs.length,
+        reviewedParagraphs: 0,
+        llmCalls: 0,
+        pdfEvidenceEnabled: false,
+      },
+    };
+  }
   const candidatesByParagraph = new Map();
-  for (let index = 0; index < paragraphs.length; index += 1) {
-    const paragraph = paragraphs[index];
-    if (paragraph.length < 6) continue;
+  const maxParagraphs = Math.max(1, Number(process.env.WORD_REVIEW_MAX_PARAGRAPHS || 120));
+  const maxLlmCalls = Math.max(0, Number(process.env.WORD_REVIEW_MAX_LLM_CALLS || 24));
+  const selected = selectReviewParagraphs(paragraphs, internalIssues, maxParagraphs);
+  let llmCalls = 0;
+
+  for (const item of selected) {
+    const { paragraph, index } = item;
     let candidates = [];
     try {
-      const retrieval = await documents.hybrid(paragraph, 5);
+      const retrieval = await documents.hybrid(paragraph, 4);
       candidates = retrieval?.results || [];
     } catch {
       candidates = [];
     }
     candidatesByParagraph.set(index, candidates);
     issues.push(...candidateRules(paragraph, index, candidates));
-    try {
-      issues.push(...await llmReview(paragraph, index, candidates, llm));
-    } catch {
-      // Rule-based review remains available when the LLM is not configured or fails.
+    if (llm.enabled && candidates.length && llmCalls < maxLlmCalls) {
+      try {
+        issues.push(...await llmReview(paragraph, index, candidates, llm));
+        llmCalls += 1;
+      } catch {
+        // Rule-based review remains available when the LLM is not configured or fails.
+      }
     }
   }
+
   attachCandidateEvidence(internalIssues, candidatesByParagraph);
-  return { paragraphs, issues: dedupeIssues(issues) };
+  return {
+    paragraphs,
+    issues: dedupeIssues(issues),
+    stats: {
+      paragraphCount: paragraphs.length,
+      reviewedParagraphs: selected.length,
+      llmCalls,
+    },
+  };
 }
