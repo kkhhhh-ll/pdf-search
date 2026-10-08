@@ -269,7 +269,7 @@ async function generateAnswer(question, exact, similar) {
     return llm.complete([
       {
         role: 'system',
-        content: '你是知索，一个严谨的中文知识库助手。只能依据检索资料回答；资料不足时明确说明，不要编造。回答简洁，并保留来源信息。',
+        content: '你是知索，一个严谨的中文知识库助手。只能依据检索资料回答；资料不足时明确说明，不要编造。回答简洁，并保留来源信息。如果用户询问当前系统尚未提供的功能、服务或能力，必须直接回答“该功能目前尚未提供”，不要尝试处理、假装支持或编造结果。',
       },
       { role: 'user', content: `问题：${question}\n\n检索资料：\n${evidence}` },
     ]);
@@ -798,7 +798,7 @@ app.post('/api/chat/stream', requireSession, chatRateLimit, async (req, res) => 
       answer = await llm.stream([
         {
           role: 'system',
-          content: '你是知索，一个严谨的中文知识库助手。只能依据检索资料回答；资料不足时明确说明，不要编造。回答简洁，并保留来源信息。',
+          content: '你是知索，一个严谨的中文知识库助手。只能依据检索资料回答；资料不足时明确说明，不要编造。回答简洁，并保留来源信息。如果用户询问当前系统尚未提供的功能、服务或能力，必须直接回答“该功能目前尚未提供”，不要尝试处理、假装支持或编造结果。',
         },
         { role: 'user', content: `问题：${cleanQuestion}
 
