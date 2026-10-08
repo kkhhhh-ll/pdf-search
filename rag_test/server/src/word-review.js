@@ -135,127 +135,6 @@ function internalMetricRules(paragraphs) {
   return issues;
 }
 
-function candidateRules(paragraph, paragraphIndex, candidates) {
-  const issues = [];
-  const sourceClaims = numericClaims(paragraph);
-  for (const candidate of candidates) {
-    const evidence = candidate.text || candidate.content || '';
-    const evidenceClaims = numericClaims(evidence);
-    for (const source of sourceClaims) {
-      const sameUnit = evidenceClaims.filter((claim) => claim.unit === source.unit);
-      const different = sameUnit.find((claim) => Math.abs(claim.value - source.value) > 1e-9);
-      if (different) {
-        issues.push(makeIssue('data_inconsistency', paragraphIndex, paragraph, {
-          evidenceText: evidence.slice(0, 500),
-          suggestion: paragraph.replace(source.raw, different.raw),
-          reason: `同一类数据在 PDF 中为 ${different.raw}，与 Word 中的 ${source.raw} 不一致`,
-          confidence: 0.9,
-          docId: candidate.doc_id || candidate.document_id,
-          fileName: candidate.file_name || candidate.document_keyword,
-          page: candidate.page,
-          partPage: candidate.part_page,
-          blockId: candidate.block_id || candidate.id,
-          bbox: candidate.bbox || [],
-        }));
-        break;
-      }
-      const sameValue = evidenceClaims.find((claim) => Math.abs(claim.value - source.value) < 1e-9 && claim.unit !== source.unit);
-      if (sameValue) {
-        issues.push(makeIssue('unit_inconsistency', paragraphIndex, paragraph, {
-          evidenceText: evidence.slice(0, 500),
-          suggestion: paragraph.replace(source.raw, sameValue.raw),
-          reason: `同一数值在 PDF 中使用了不同单位：${source.unit} vs ${sameValue.unit}`,
-          confidence: 0.88,
-          docId: candidate.doc_id || candidate.document_id,
-          fileName: candidate.file_name || candidate.document_keyword,
-          page: candidate.page,
-          blockId: candidate.block_id || candidate.id,
-          bbox: candidate.bbox || [],
-        }));
-      }
-    }
-  }
-  return issues;
-}
-
-function parseLlmIssues(raw, paragraph, paragraphIndex, candidates) {
-  if (!raw) return [];
-  const match = String(raw).match(/\[[\s\S]*\]|\{[\s\S]*\}/);
-  if (!match) return [];
-  let payload;
-  try {
-    payload = JSON.parse(match[0]);
-  } catch {
-    return [];
-  }
-  const list = Array.isArray(payload) ? payload : payload.issues || [];
-  return list
-    .filter((item) => item && item.has_issue !== false && item.reason)
-    .map((item) => {
-      const candidate = candidates[item.candidate_index ?? 0] || {};
-      return makeIssue(item.issue_type || 'semantic', paragraphIndex, paragraph, {
-        severity: item.severity || 'medium',
-        evidenceText: item.evidence_text || candidate.text || candidate.content || '',
-        suggestion: item.suggestion || '',
-        reason: item.reason,
-        confidence: Number(item.confidence || 0.7),
-        docId: candidate.doc_id || candidate.document_id,
-        fileName: candidate.file_name || candidate.document_keyword,
-        page: candidate.page,
-        partPage: candidate.part_page,
-        blockId: candidate.block_id || candidate.id,
-        bbox: candidate.bbox || [],
-      });
-    });
-}
-
-async function llmReview(paragraph, paragraphIndex, candidates, llm) {
-  if (!llm.enabled || !candidates.length) return [];
-  const evidence = candidates.slice(0, 4).map((item, index) => `[${index}] ${item.text || item.content || ''}`).join('\n\n');
-  const prompt = `你是严谨的中文文档一致性审核员。请比较 Word 段落和 PDF 证据，找出以下问题：\n1. 相似内容但表述不一致；\n2. 同一数据类型但数值不一致；\n3. 单位不一致；\n4. 明显逻辑错误、单位错误、语义不完整。\n\nWord 段落：\n${paragraph}\n\nPDF 候选证据：\n${evidence}\n\n只输出 JSON，不要解释。格式：\n{"issues":[{"has_issue":true,"issue_type":"data_inconsistency|unit_inconsistency|logic_error|semantic_completeness|terminology|format_inconsistency","severity":"high|medium|low","candidate_index":0,"evidence_text":"原文证据","suggestion":"建议修改","reason":"原因","confidence":0.9}]}`;
-  const raw = await llm.complete([
-    { role: 'system', content: '只输出 JSON。页码、文件和证据不得编造，只能引用候选证据。' },
-    { role: 'user', content: prompt },
-  ], { temperature: 0 });
-  return parseLlmIssues(raw, paragraph, paragraphIndex, candidates);
-}
-
-function dedupeIssues(issues) {
-  const seen = new Set();
-  const output = [];
-  for (const issue of issues) {
-    const key = `${issue.issueType}:${issue.paragraphIndex}:${issue.sourceText}:${issue.docId}:${issue.page}:${issue.blockId}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    output.push(issue);
-  }
-  return output;
-}
-
-const EVIDENCE_KEYS = [
-  '国产碳纤维', '制造能力/资质', '突破注塑内胆成型工艺',
-  '技术进步一等奖', '2023年版', '2025-04', '36.2%',
-];
-
-function attachCandidateEvidence(issues, candidatesByParagraph) {
-  for (const issue of issues) {
-    if (issue.docId || issue.page) continue;
-    const key = EVIDENCE_KEYS.find((item) => `${issue.suggestion} ${issue.reason}`.includes(item));
-    if (!key) continue;
-    const candidates = candidatesByParagraph.get(issue.paragraphIndex) || [];
-    const candidate = candidates.find((item) => String(item.text || item.content || '').includes(key));
-    if (!candidate) continue;
-    issue.docId = candidate.doc_id || candidate.document_id;
-    issue.fileName = candidate.file_name || candidate.document_keyword;
-    issue.page = candidate.page;
-    issue.partPage = candidate.part_page;
-    issue.blockId = candidate.block_id || candidate.id;
-    issue.bbox = candidate.bbox || [];
-    issue.evidenceText = issue.evidenceText || String(candidate.text || candidate.content || '').slice(0, 500);
-  }
-  return issues;
-}
-
 function paragraphPriority(paragraph, index, priorityIndexes) {
   if (priorityIndexes.has(index)) return 1000 - index * 0.001;
   const value = String(paragraph || '').trim();
@@ -279,57 +158,76 @@ function selectReviewParagraphs(paragraphs, internalIssues, maxParagraphs) {
     .sort((a, b) => a.index - b.index);
 }
 
-export async function reviewWordFile({ filePath, documents, llm }) {
+function parseLlmIssues(raw, paragraph, paragraphIndex) {
+  if (!raw) return [];
+  const match = String(raw).match(/\[[\s\S]*\]|\{[\s\S]*\}/);
+  if (!match) return [];
+  let payload;
+  try {
+    payload = JSON.parse(match[0]);
+  } catch {
+    return [];
+  }
+  const list = Array.isArray(payload) ? payload : payload.issues || [];
+  return list
+    .filter((item) => item && item.has_issue !== false && item.reason)
+    .map((item) => makeIssue(item.issue_type || 'semantic', paragraphIndex, paragraph, {
+      severity: item.severity || 'medium',
+      suggestion: item.suggestion || '',
+      reason: item.reason,
+      confidence: Number(item.confidence || 0.7),
+    }));
+}
+
+async function llmInternalReview(paragraph, paragraphIndex, paragraphs, llm) {
+  if (!llm.enabled) return [];
+  const before = paragraphs.slice(Math.max(0, paragraphIndex - 2), paragraphIndex).join('\n');
+  const after = paragraphs.slice(paragraphIndex + 1, paragraphIndex + 3).join('\n');
+  const prompt = `你是严谨的中文文档一致性审核员。请只依据这份 Word 文档自身的前后文，检查当前段落是否存在：\n1. 相似内容但表述不一致；\n2. 同一数据类型但数值不一致；\n3. 单位不一致；\n4. 明显逻辑错误、单位错误、语义不完整、格式不一致。\n\n前文：\n${before || '（无）'}\n\n当前段落：\n${paragraph}\n\n后文：\n${after || '（无）'}\n\n只输出 JSON，不要解释。没有问题时输出 {"issues":[]}。格式：\n{"issues":[{"has_issue":true,"issue_type":"data_inconsistency|unit_inconsistency|logic_error|semantic_completeness|terminology|format_inconsistency","severity":"high|medium|low","suggestion":"建议修改","reason":"原因","confidence":0.9}]}`;
+  const raw = await llm.complete([
+    { role: 'system', content: '只输出 JSON。不得编造文档中不存在的数据或证据。' },
+    { role: 'user', content: prompt },
+  ], { temperature: 0 });
+  return parseLlmIssues(raw, paragraph, paragraphIndex);
+}
+
+function dedupeIssues(issues) {
+  const seen = new Set();
+  const output = [];
+  for (const issue of issues) {
+    const key = `${issue.issueType}:${issue.paragraphIndex}:${issue.sourceText}:${issue.docId}:${issue.page}:${issue.blockId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    output.push(issue);
+  }
+  return output;
+}
+
+export async function reviewWordFile({ filePath, llm }) {
   const paragraphs = await extractParagraphs(filePath);
   const internalIssues = [...internalRules(paragraphs), ...internalMetricRules(paragraphs)];
   const issues = [...internalIssues];
-  const pdfEvidenceEnabled = process.env.WORD_REVIEW_PDF_EVIDENCE === 'true';
-  if (!pdfEvidenceEnabled) {
-    return {
-      paragraphs,
-      issues: dedupeIssues(issues),
-      stats: {
-        paragraphCount: paragraphs.length,
-        reviewedParagraphs: 0,
-        llmCalls: 0,
-        pdfEvidenceEnabled: false,
-      },
-    };
-  }
-  const candidatesByParagraph = new Map();
   const maxParagraphs = Math.max(1, Number(process.env.WORD_REVIEW_MAX_PARAGRAPHS || 120));
-  const maxLlmCalls = Math.max(0, Number(process.env.WORD_REVIEW_MAX_LLM_CALLS || 24));
+  const maxLlmCalls = Math.max(0, Number(process.env.WORD_REVIEW_MAX_LLM_CALLS || 12));
   const selected = selectReviewParagraphs(paragraphs, internalIssues, maxParagraphs);
   let llmCalls = 0;
 
   for (const item of selected) {
-    const { paragraph, index } = item;
-    let candidates = [];
+    if (!llm.enabled || llmCalls >= maxLlmCalls) break;
     try {
-      const retrieval = await documents.hybrid(paragraph, 4);
-      candidates = retrieval?.results || [];
+      issues.push(...await llmInternalReview(item.paragraph, item.index, paragraphs, llm));
+      llmCalls += 1;
     } catch {
-      candidates = [];
-    }
-    candidatesByParagraph.set(index, candidates);
-    issues.push(...candidateRules(paragraph, index, candidates));
-    if (llm.enabled && candidates.length && llmCalls < maxLlmCalls) {
-      try {
-        issues.push(...await llmReview(paragraph, index, candidates, llm));
-        llmCalls += 1;
-      } catch {
-        // Rule-based review remains available when the LLM is not configured or fails.
-      }
+      // Rule-based review remains available when the LLM is not configured or fails.
     }
   }
 
-  attachCandidateEvidence(internalIssues, candidatesByParagraph);
   return {
     paragraphs,
     issues: dedupeIssues(issues),
     stats: {
       paragraphCount: paragraphs.length,
-      reviewedParagraphs: selected.length,
+      reviewedParagraphs: Math.min(selected.length, maxLlmCalls),
       llmCalls,
     },
   };

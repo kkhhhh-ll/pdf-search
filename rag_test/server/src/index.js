@@ -903,7 +903,7 @@ app.post('/api/chat/word-review', requireSession, uploadRateLimit, upload.single
     });
 
     task = await createReviewTask(req.zhisuoUser, file.originalname);
-    const result = await reviewWordFile({ filePath: file.path, documents, llm });
+    const result = await reviewWordFile({ filePath: file.path, llm });
     await addReviewIssues(task.id, result.issues);
     task = await updateReviewTask(req.zhisuoUser, task.id, {
       status: 'done',
@@ -960,7 +960,7 @@ app.post('/api/review/word', requireSession, uploadRateLimit, upload.single('fil
   }
   let task = await createReviewTask(req.zhisuoUser, file.originalname);
   try {
-    const result = await reviewWordFile({ filePath: file.path, documents, llm });
+    const result = await reviewWordFile({ filePath: file.path, llm });
     await addReviewIssues(task.id, result.issues);
     task = await updateReviewTask(req.zhisuoUser, task.id, {
       status: 'done',

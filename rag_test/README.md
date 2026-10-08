@@ -141,15 +141,15 @@ Word 审核现在直接发生在 Chat 中：
 2. 选择 `.docx`
 3. assistant 消息显示审核进度
 4. 完成后在 Chat 内展示问题列表
-5. 点击问题打开对应 RAGFlow 分片证据图片
+5. 在 Chat 内查看问题段落、修改建议和差异高亮
 
-Word 审核使用：
+Word 审核只分析 Word 文档自身，不依赖 PDF 或 RAGFlow：
 
 ```text
 mammoth 解析 Word 段落
-RAGFlow retrieval 获取相似 PDF 证据
-规则引擎检查数值、单位、日期、术语和逻辑
-LLM 复核语义问题
+全局规则检查术语、数值、单位、日期和逻辑
+文档前后文检查同一指标是否出现多个值
+LLM 对高优先级段落做前后文语义复核
 ```
 
 ## 生产部署
