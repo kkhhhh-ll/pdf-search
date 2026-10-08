@@ -824,6 +824,95 @@ ${chunks[0].content.slice(0, 1200)}`
   }
 });
 
+function wordReviewContent(task) {
+  const count = Number(task?.issueCount || 0);
+  if (!count) {
+    return `## Word 审核完成
+
+已审核《${task.fileName}》，未发现明显的数据、单位、格式或语义问题。`;
+  }
+  return `## Word 审核完成
+
+已审核《${task.fileName}》，发现 **${count}** 个疑似问题。请在下方逐条查看原文、证据和修改建议。`;
+}
+
+app.post('/api/chat/word-review', requireSession, uploadRateLimit, upload.single('file'), async (req, res) => {
+  const file = req.file;
+  if (!file) return res.status(400).json({ code: 400, message: '请上传 Word 文件' });
+  if (!/\.docx$/i.test(file.originalname)) {
+    await unlink(file.path).catch(() => null);
+    return res.status(400).json({ code: 400, message: '当前仅支持 .docx 文件' });
+  }
+
+  let conversation = null;
+  let task = null;
+  try {
+    conversation = req.body?.conversationId
+      ? await getConversation(req.zhisuoUser, req.body.conversationId)
+      : null;
+    if (!conversation) {
+      conversation = await createConversation(
+        req.zhisuoUser,
+        `审核 ${file.originalname}`.slice(0, 80),
+        req.body?.conversationId || undefined,
+      );
+    }
+
+    const userMessage = await addMessage(req.zhisuoUser, conversation.id, {
+      role: 'user',
+      content: `请审核 Word 文件《${file.originalname}》。`,
+      status: 'complete',
+    });
+
+    task = await createReviewTask(req.zhisuoUser, file.originalname);
+    const result = await reviewWordFile({ filePath: file.path, pdfsearch, llm });
+    await addReviewIssues(task.id, result.issues);
+    task = await updateReviewTask(req.zhisuoUser, task.id, {
+      status: 'done',
+      issueCount: result.issues.length,
+    });
+    const complete = await getReviewTask(req.zhisuoUser, task.id);
+    const assistantMessage = await addMessage(req.zhisuoUser, conversation.id, {
+      role: 'assistant',
+      content: wordReviewContent(complete),
+      status: 'complete',
+      model: 'word-review',
+      metadata: { kind: 'word_review', reviewTask: complete },
+    });
+
+    return res.json({
+      code: 0,
+      data: {
+        conversationId: conversation.id,
+        userMessage,
+        assistantMessage: { ...assistantMessage, reviewTask: complete },
+        reviewTask: complete,
+      },
+    });
+  } catch (error) {
+    const message = String(error?.message || error);
+    if (task) {
+      await updateReviewTask(req.zhisuoUser, task.id, {
+        status: 'failed',
+        errorMessage: message,
+      }).catch(() => null);
+    }
+    if (conversation) {
+      await addMessage(req.zhisuoUser, conversation.id, {
+        role: 'assistant',
+        content: `Word 审核失败：${message}`,
+        status: 'error',
+        model: 'word-review',
+        errorMessage: message,
+        metadata: { kind: 'word_review_error' },
+      }).catch(() => null);
+    }
+    return res.status(500).json({ code: 500, message });
+  } finally {
+    await unlink(file.path).catch(() => null);
+  }
+});
+
 app.post('/api/review/word', requireSession, uploadRateLimit, upload.single('file'), async (req, res) => {
   const file = req.file;
   if (!file) return res.status(400).json({ code: 400, message: '请上传 Word 文件' });

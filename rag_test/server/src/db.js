@@ -50,6 +50,7 @@ export async function initDb() {
       completion_tokens INTEGER NOT NULL DEFAULT 0,
       latency_ms INTEGER NOT NULL DEFAULT 0,
       error_message TEXT,
+      metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
@@ -98,6 +99,9 @@ export async function initDb() {
       status TEXT NOT NULL DEFAULT 'pending',
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+
+    ALTER TABLE messages
+      ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb;
 
     CREATE TABLE IF NOT EXISTS message_citations (
       id TEXT PRIMARY KEY,

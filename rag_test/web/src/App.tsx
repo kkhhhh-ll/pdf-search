@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
-  CheckCircle2,
   ChevronRight,
   Download,
   FileText,
@@ -12,7 +13,6 @@ import {
   Menu,
   MoreHorizontal,
   MessageSquarePlus,
-  Paperclip,
   RefreshCw,
   Search,
   Send,
@@ -22,8 +22,8 @@ import {
   ShieldCheck,
   Sparkles,
   Trash2,
-  Pencil,
   UploadCloud,
+  Pencil,
   UserRound,
   X,
   XCircle,
@@ -125,6 +125,7 @@ type ChatMessage = {
   content: string;
   exact?: Chunk[];
   similar?: Chunk[];
+  reviewTask?: ReviewTask;
   pending?: boolean;
   error?: boolean;
   createdAt: number;
@@ -241,14 +242,11 @@ function App() {
   const [uploading, setUploading] = useState(false);
   const [knowledgeOpen, setKnowledgeOpen] = useState(false);
   const [systemOpen, setSystemOpen] = useState(false);
-  const [reviewOpen, setReviewOpen] = useState(false);
-  const [reviewTask, setReviewTask] = useState<ReviewTask | null>(null);
-  const [reviewUploading, setReviewUploading] = useState(false);
-  const [reviewError, setReviewError] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [previewChunk, setPreviewChunk] = useState<Chunk | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const wordInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const streamAbortRef = useRef<AbortController | null>(null);
 
@@ -333,6 +331,7 @@ function App() {
           content: message.content || '',
           exact: message.exact || [],
           similar: message.similar || [],
+          reviewTask: message.metadata?.reviewTask,
           pending: message.status === 'streaming',
           error: message.status === 'error',
           createdAt: Date.parse(message.createdAt) || Date.now(),
@@ -677,20 +676,75 @@ function App() {
     window.open(`/api/documents/${encodeURIComponent(document.id)}/download`, '_blank', 'noopener,noreferrer');
   };
 
-  const uploadWordReview = async (file: File) => {
-    setReviewUploading(true);
-    setReviewError('');
+  const sendWordReview = async (file: File) => {
+    if (!/\.docx$/i.test(file.name)) {
+      window.alert('当前仅支持 .docx 文件');
+      return;
+    }
+    if (sessionIsRunning) return;
+
+    let sessionId = activeSession?.id;
+    if (!sessionId) {
+      const session = createSession();
+      sessionId = session.id;
+      setSessions((current) => [session, ...current]);
+      setActiveSessionId(session.id);
+    }
+
+    const assistantId = crypto.randomUUID();
+    const userMessage: ChatMessage = {
+      id: crypto.randomUUID(),
+      role: 'user',
+      content: `请审核 Word 文件《${file.name}》。`,
+      createdAt: Date.now(),
+    };
+    const pendingMessage: ChatMessage = {
+      id: assistantId,
+      role: 'assistant',
+      content: '正在解析 Word、逐段比对 PDF 证据，并检查数据、单位和语义问题…',
+      pending: true,
+      createdAt: Date.now(),
+    };
+
+    updateSession(sessionId, (session) => ({
+      ...session,
+      title: session.messages.length === 0 ? `审核 ${file.name}` : session.title,
+      messages: [...session.messages, userMessage, pendingMessage],
+      updatedAt: Date.now(),
+    }));
+
+    const patchAssistant = (patch: Partial<ChatMessage>) => {
+      updateSession(sessionId, (session) => ({
+        ...session,
+        messages: session.messages.map((message) => (
+          message.id === assistantId ? { ...message, ...patch } : message
+        )),
+        updatedAt: Date.now(),
+      }));
+    };
+
     try {
       const form = new FormData();
       form.append('file', file);
-      const response = await csrfFetch('/api/review/word', { method: 'POST', body: form });
+      form.append('conversationId', sessionId);
+      const response = await csrfFetch('/api/chat/word-review', { method: 'POST', body: form });
       const payload = await response.json().catch(() => null);
       if (!response.ok || payload?.code !== 0) throw new Error(payload?.message || 'Word 审核失败');
-      setReviewTask(payload.data);
+      const reviewTask = payload.data?.reviewTask as ReviewTask;
+      patchAssistant({
+        content: payload.data?.assistantMessage?.content || 'Word 审核完成。',
+        reviewTask,
+        pending: false,
+      });
+      await refreshConversations();
     } catch (error) {
-      setReviewError(error instanceof Error ? error.message : String(error));
+      patchAssistant({
+        content: error instanceof Error ? error.message : String(error),
+        error: true,
+        pending: false,
+      });
     } finally {
-      setReviewUploading(false);
+      if (wordInputRef.current) wordInputRef.current.value = '';
     }
   };
 
@@ -731,7 +785,7 @@ function App() {
     const pendingMessage: ChatMessage = {
       id: assistantId,
       role: 'assistant',
-      content: '正在检索知识库…',
+      content: '',
       pending: true,
       createdAt: Date.now(),
     };
@@ -965,11 +1019,6 @@ function App() {
             <span className="sidebar-tool-copy"><strong>知识库</strong><small>{completedCount} 份文档已入库</small></span>
             <ChevronRight size={15} />
           </button>
-          <button className="sidebar-tool" onClick={() => setReviewOpen(true)}>
-            <span className="sidebar-tool-icon"><FileText size={17} /></span>
-            <span className="sidebar-tool-copy"><strong>Word 审核</strong><small>{reviewTask ? `${reviewTask.issueCount} 个问题` : '检查一致性错误'}</small></span>
-            <ChevronRight size={15} />
-          </button>
           <button className="sidebar-tool" onClick={() => setSystemOpen(true)}>
             <span className="sidebar-tool-icon"><Settings2 size={17} /></span>
             <span className="sidebar-tool-copy"><strong>系统设置</strong><small>服务状态与退出</small></span>
@@ -995,17 +1044,23 @@ function App() {
             <div className="chat-welcome">
               <span className="welcome-icon"><Sparkles size={28} /></span>
               <h1>你好，我是知索</h1>
-              <p>我目前只处理当前知识库里的问题：可以查找明确文字，也可以直接描述想问的内容。其他通用聊天暂不支持。</p>
               <div className="suggestion-row">
                 <button onClick={() => void sendMessage('帮我总结一下当前知识库的主要内容')}>总结已上传资料</button>
                 <button onClick={() => void sendMessage('帮我查找发票号码相关的信息')}>查找发票内容</button>
                 <button onClick={() => setKnowledgeOpen(true)}>上传新的 PDF</button>
+                <button onClick={() => wordInputRef.current?.click()}>审核 Word 文件</button>
               </div>
             </div>
           ) : (
             <div className="message-list">
               {activeSession.messages.map((message) => (
-                <MessageBubble key={message.id} message={message} onSelectChunk={setPreviewChunk} onRegenerate={message.role === 'assistant' && activeSession ? () => regenerateMessage(activeSession.id, message.id) : undefined} />
+                <MessageBubble
+                  key={message.id}
+                  message={message}
+                  onSelectChunk={setPreviewChunk}
+                  onOpenReviewIssue={openReviewIssue}
+                  onRegenerate={message.role === 'assistant' && activeSession ? () => regenerateMessage(activeSession.id, message.id) : undefined}
+                />
               ))}
               <div ref={messagesEndRef} />
             </div>
@@ -1029,11 +1084,19 @@ function App() {
                 rows={activeSession?.messages.length ? 1 : 2}
               />
               <div className="composer-footer">
-                <button className="composer-tool" onClick={() => fileInputRef.current?.click()} title="上传 PDF">
-                  <Paperclip size={18} />
-                  <span>上传 PDF</span>
-                </button>
-                <span>{completedCount ? `${completedCount} 份文档可检索` : '先上传资料再提问'}</span>
+                <div className="composer-actions">
+                  <button
+                    className="composer-tool word-review-button"
+                    type="button"
+                    onClick={() => wordInputRef.current?.click()}
+                    disabled={sessionIsRunning}
+                    title="上传 Word 进行一致性审核"
+                  >
+                    <FileText size={15} />
+                    <span>审核 Word</span>
+                  </button>
+                  <span>{completedCount ? `${completedCount} 份文档可检索` : '请先在知识库中上传资料'}</span>
+                </div>
                 {sessionIsRunning ? (
                   <button className="send-button stop" onClick={stopGeneration} title="停止生成">
                     <Square size={15} />
@@ -1057,6 +1120,13 @@ function App() {
           hidden
           onChange={(event) => event.target.files && void uploadPdfs(event.target.files)}
         />
+        <input
+          ref={wordInputRef}
+          type="file"
+          accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          hidden
+          onChange={(event) => event.target.files?.[0] && void sendWordReview(event.target.files[0])}
+        />
       </main>
 
       {knowledgeOpen && (
@@ -1075,17 +1145,6 @@ function App() {
           onReindex={reindexPdf}
           onDownload={downloadPdf}
           onClose={() => setKnowledgeOpen(false)}
-        />
-      )}
-
-      {reviewOpen && (
-        <WordReviewDrawer
-          task={reviewTask}
-          uploading={reviewUploading}
-          error={reviewError}
-          onUpload={uploadWordReview}
-          onOpenIssue={openReviewIssue}
-          onClose={() => setReviewOpen(false)}
         />
       )}
 
@@ -1156,7 +1215,68 @@ function LoginScreen({
   );
 }
 
-function MessageBubble({ message, onSelectChunk, onRegenerate }: { message: ChatMessage; onSelectChunk: (chunk: Chunk) => void; onRegenerate?: () => void }) {
+function MarkdownContent({ content, streaming = false }: { content: string; streaming?: boolean }) {
+  return (
+    <div className={`markdown-body${streaming ? ' streaming' : ''}`}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          table: ({ children }) => (
+            <div className="markdown-table-wrap">
+              <table>{children}</table>
+            </div>
+          ),
+        }}
+      >
+        {content}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
+function WordReviewResult({ task, onOpenIssue }: { task: ReviewTask; onOpenIssue: (issue: ReviewIssue) => void }) {
+  return (
+    <section className="chat-review-result">
+      <div className="chat-review-heading">
+        <div>
+          <span className="eyebrow">Word 一致性审核</span>
+          <strong>{task.issueCount ? `${task.issueCount} 个疑似问题` : '未发现明显问题'}</strong>
+          <small>{task.fileName}</small>
+        </div>
+        <span className="status-pill done">{task.status === 'done' ? '已完成' : task.status}</span>
+      </div>
+      {!!task.issues.length && (
+        <div className="review-issue-list chat-review-list">
+          {task.issues.map((issue) => (
+            <button className="review-issue" key={issue.id} onClick={() => onOpenIssue(issue)}>
+              <div className="review-issue-head">
+                <span className={`review-type ${issue.severity}`}>{issue.issueType}</span>
+                {issue.page ? <span>第 {issue.page} 页</span> : null}
+                <span>{Math.round(issue.confidence * 100)}%</span>
+              </div>
+              <p><strong>原文：</strong>{issue.sourceText}</p>
+              {issue.evidenceText && <p><strong>证据：</strong>{issue.evidenceText}</p>}
+              <p><strong>建议：</strong>{issue.suggestion || '需人工复核'}</p>
+              <p className="review-reason">{issue.reason}</p>
+            </button>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function MessageBubble({
+  message,
+  onSelectChunk,
+  onOpenReviewIssue,
+  onRegenerate,
+}: {
+  message: ChatMessage;
+  onSelectChunk: (chunk: Chunk) => void;
+  onOpenReviewIssue: (issue: ReviewIssue) => void;
+  onRegenerate?: () => void;
+}) {
   const sources = [...(message.exact || []), ...(message.similar || [])];
   if (message.role === 'user') {
     return <div className="message-row user"><div className="message-bubble">{message.content}</div></div>;
@@ -1167,10 +1287,13 @@ function MessageBubble({ message, onSelectChunk, onRegenerate }: { message: Chat
       <span className="assistant-avatar">知</span>
       <div className="assistant-content">
         <div className={`message-bubble ${message.error ? 'error' : ''}`}>
-          {message.pending ? (
-            <span className="typing"><i /><i /><i /></span>
+          {message.content ? (
+            <MarkdownContent content={message.content} streaming={message.pending} />
           ) : (
-            <p>{message.content}</p>
+            <span className="typing"><i /><i /><i /></span>
+          )}
+          {message.reviewTask && !message.pending && (
+            <WordReviewResult task={message.reviewTask} onOpenIssue={onOpenReviewIssue} />
           )}
           {!message.pending && onRegenerate && (
             <button className="message-regenerate" onClick={onRegenerate}><RefreshCw size={12} />重新生成</button>
@@ -1393,69 +1516,6 @@ function KnowledgeDrawer({
           )}
         </div>
         <p className="drawer-footnote">{dataset ? '所有 PDF 自动进入当前唯一知识库。' : '正在准备知识库…'}</p>
-      </aside>
-    </div>
-  );
-}
-
-function WordReviewDrawer({
-  task,
-  uploading,
-  error,
-  onUpload,
-  onOpenIssue,
-  onClose,
-}: {
-  task: ReviewTask | null;
-  uploading: boolean;
-  error: string;
-  onUpload: (file: File) => void;
-  onOpenIssue: (issue: ReviewIssue) => void;
-  onClose: () => void;
-}) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  return (
-    <div className="drawer-backdrop" onClick={onClose}>
-      <aside className="drawer review-drawer" onClick={(event) => event.stopPropagation()}>
-        <div className="drawer-header">
-          <div><span className="eyebrow">一致性审核</span><h2>Word 审核</h2><p className="drawer-user">检查表述、数值、单位和逻辑错误</p></div>
-          <button className="icon-button" onClick={onClose} aria-label="关闭 Word 审核"><X size={19} /></button>
-        </div>
-        <div className="drawer-upload" onClick={() => inputRef.current?.click()}>
-          <input
-            ref={inputRef}
-            type="file"
-            accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            hidden
-            onChange={(event) => event.target.files?.[0] && onUpload(event.target.files[0])}
-          />
-          {uploading ? <LoaderCircle size={25} className="spin" /> : <UploadCloud size={25} />}
-          <div><strong>{uploading ? '正在审核…' : '上传 Word 文件'}</strong><span>支持 .docx，审核完成后可点击问题查看 PDF 证据。</span></div>
-        </div>
-        {error && <div className="user-admin-error"><XCircle size={14} />{error}</div>}
-        {task && (
-          <div className="review-summary">
-            <div><strong>{task.issueCount}</strong><span>疑似问题</span></div>
-            <div><strong>{task.status === 'done' ? '已完成' : task.status}</strong><span>{task.fileName}</span></div>
-          </div>
-        )}
-        <div className="review-issue-list">
-          {(task?.issues || []).map((issue) => (
-            <button className="review-issue" key={issue.id} onClick={() => onOpenIssue(issue)}>
-              <div className="review-issue-head">
-                <span className={`review-type ${issue.severity}`}>{issue.issueType}</span>
-                {issue.page ? <span>第 {issue.page} 页</span> : null}
-                <span>{Math.round(issue.confidence * 100)}%</span>
-              </div>
-              <p><strong>原文：</strong>{issue.sourceText}</p>
-              {issue.evidenceText && <p><strong>证据：</strong>{issue.evidenceText}</p>}
-              <p><strong>建议：</strong>{issue.suggestion || '需人工复核'}</p>
-              <p className="review-reason">{issue.reason}</p>
-            </button>
-          ))}
-          {!task && !uploading && <div className="drawer-empty"><FileText size={30} /><strong>还没有审核结果</strong><span>上传 .docx 后开始检查。</span></div>}
-          {task && !task.issues.length && <div className="drawer-empty"><CheckCircle2 size={30} /><strong>未发现明显问题</strong></div>}
-        </div>
       </aside>
     </div>
   );

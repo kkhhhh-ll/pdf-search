@@ -24,6 +24,7 @@ function messageFromRow(row) {
     completionTokens: row.completion_tokens,
     latencyMs: row.latency_ms,
     errorMessage: row.error_message,
+    metadata: row.metadata || {},
     createdAt: row.created_at,
     exact: [],
     similar: [],
@@ -94,8 +95,8 @@ export async function addMessage(userId, conversationId, message) {
   const { rows } = await pool.query(
     `INSERT INTO messages (
        id, conversation_id, user_id, role, content, status, model,
-       prompt_tokens, completion_tokens, latency_ms, error_message
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+       prompt_tokens, completion_tokens, latency_ms, error_message, metadata
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb)
      RETURNING *`,
     [
       message.id || randomUUID(),
@@ -109,6 +110,7 @@ export async function addMessage(userId, conversationId, message) {
       message.completionTokens || 0,
       message.latencyMs || 0,
       message.errorMessage || null,
+      JSON.stringify(message.metadata || {}),
     ],
   );
   await pool.query(
