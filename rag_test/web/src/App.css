@@ -2219,3 +2219,86 @@ body { background: #f4f7f8; }
   .chat-review-list .review-issue { padding: 12px; }
   .chat-review-list .review-issue p { font-size: 11.5px; }
 }
+
+/* Final mobile overrides must stay after all desktop polish rules. */
+@media (max-width: 900px) {
+  .chat-app {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .chat-main {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .chat-header {
+    padding: 0 14px;
+  }
+
+  .chat-welcome {
+    width: calc(100% - 28px);
+  }
+
+  .message-list {
+    width: calc(100% - 28px);
+    max-width: 980px;
+    padding-top: 26px;
+  }
+
+  .assistant-content {
+    max-width: calc(100% - 44px);
+  }
+
+  .composer-dock {
+    padding: 8px 14px 14px;
+  }
+}
+
+@media (max-width: 600px) {
+  .chat-header {
+    padding: 0 10px;
+  }
+
+  .message-list {
+    width: calc(100% - 20px);
+    padding-top: 20px;
+  }
+
+  .chat-welcome {
+    width: calc(100% - 24px);
+  }
+
+  .chat-welcome h1 {
+    font-size: 30px;
+  }
+
+  .assistant-content {
+    max-width: calc(100% - 42px);
+  }
+
+  .message-row.assistant {
+    gap: 8px;
+  }
+
+  .message-row.assistant .message-bubble {
+    padding: 13px 14px;
+    border-radius: 16px 16px 16px 5px;
+  }
+
+  .composer-dock {
+    padding: 7px 10px 12px;
+  }
+
+  .composer {
+    padding: 10px 11px 8px;
+    border-radius: 20px;
+  }
+
+  .composer-actions {
+    min-width: 0;
+  }
+
+  .word-review-button span {
+    display: none;
+  }
+}

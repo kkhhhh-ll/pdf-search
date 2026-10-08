@@ -1595,7 +1595,7 @@ function SystemDrawer({
           {!health?.checks?.length && <div className="drawer-empty"><Server size={24} /><strong>正在读取服务状态</strong></div>}
         </div>
 
-        {role === 'admin' && (
+        {role === 'admin' && showUserManagement && (
           <section className="user-admin">
             <div className="user-admin-heading">
               <div><span className="eyebrow">管理员</span><h3>用户管理</h3></div>
